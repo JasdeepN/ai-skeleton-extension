@@ -2,7 +2,7 @@
   "name": "ai-skeleton-prompts",
   "displayName": "AI Skeleton - Memory & Prompts",
   "description": "Complete AI agent toolkit: Native memory management (AI-Memory), workflow prompts, MCP integration, and agent definitions.",
-  "version": "0.1.8",
+  "version": "0.1.9",
   "publisher": "JasdeepN",
   "license": "SEE LICENSE IN LICENSE",
   "repository": {
