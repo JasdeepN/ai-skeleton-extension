@@ -2,8 +2,8 @@
   "name": "ai-skeleton-extension",
   "displayName": "AI Skeleton Prompts & Memory",
   "description": "Complete AI agent toolkit: Native memory management (AI-Memory), workflow prompts, MCP integration, and agent definitions.",
-  "version": "0.1.13",
-  "publisher": "JasdeepN4",
+  "version": "0.1.14",
+  "publisher": "JasdeepN",
   "license": "SEE LICENSE IN LICENSE",
   "repository": {
     "type": "git",
