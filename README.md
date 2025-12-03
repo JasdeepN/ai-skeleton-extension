@@ -1,4 +1,4 @@
-# AI Skeleton - Memory & Prompts Extension
+# AI Skeleton Prompts & Memory
 
 **Complete AI agent toolkit for VS Code**: Native memory management, workflow prompts, MCP integration, and agent definitions.
 
@@ -18,9 +18,19 @@ This extension extends **Copilot agent** context and memory capabilities by prov
 - **VS Code:** 1.95.0 or newer (for Language Model Tools API)
 - **License:** Proprietary — see LICENSE (explicit written approval required)
 
+### Install from VS Code Marketplace (Recommended)
+
+1. Search "AI Skeleton" in VS Code Extensions
+2. Click Install on "AI Skeleton Prompts & Memory" by JasdeepN4
+
+Or install via command line:
+```bash
+code --install-extension JasdeepN4.ai-skeleton-extension
+```
+
 ### Install from VSIX
 
-1. Download `ai-skeleton-prompts-0.1.8.vsix` from the [releases](https://github.com/JasdeepN/ai-skeleton-extension/releases)
+1. Download latest `.vsix` from [releases](https://github.com/JasdeepN/ai-skeleton-extension/releases)
 2. In VS Code: Extensions → `...` menu → "Install from VSIX..."
 3. Select the downloaded `.vsix` file
 4. Reload VS Code
