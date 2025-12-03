@@ -21,11 +21,11 @@ This extension extends **Copilot agent** context and memory capabilities by prov
 ### Install from VS Code Marketplace (Recommended)
 
 1. Search "AI Skeleton" in VS Code Extensions
-2. Click Install on "AI Skeleton Prompts & Memory" by JasdeepN4
+2. Click Install on "AI Skeleton Prompts & Memory" by JasdeepN
 
 Or install via command line:
 ```bash
-code --install-extension JasdeepN4.ai-skeleton-extension
+code --install-extension JasdeepN.ai-skeleton-extension
 ```
 
 ### Install from VSIX
@@ -221,9 +221,8 @@ It should, provided you're on **VS Code 1.95+**. The Language Model Tools API is
 
 If tools don't appear in agent mode or the tool picker:
 1. Verify VS Code version (Help → About): must be 1.95 or newer
-2. Ensure this extension version is 0.1.8 or newer
-3. Confirm tool contributions include `canBeReferencedInPrompt: true` (already configured)
-4. Reload VS Code after installation
+2. Reload VS Code after installation
+3. Run `AI Skeleton: List Registered LM Tools` to verify 7 tools are registered
 
 ### Can I use this without the extension?
 
@@ -338,6 +337,6 @@ Built for agent-assisted development workflows. Uses VS Code's Language Model To
 
 ---
 
-**Version**: 0.1.8  
-**Status**: Works via VSIX on VS Code 1.95+; use Extension Development Host (F5) optionally for development/debugging  
-**Purpose**: Extend agent context and memory capabilities
+**Marketplace**: [JasdeepN.ai-skeleton-extension](https://marketplace.visualstudio.com/items?itemName=JasdeepN.ai-skeleton-extension)  
+**Install**: `code --install-extension JasdeepN.ai-skeleton-extension`  
+**Status**: Production-ready on VS Code 1.95+
