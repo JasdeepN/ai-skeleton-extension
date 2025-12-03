@@ -1,0 +1,24 @@
+.vscode/**
+.vscode-test/**
+src/**
+.gitignore
+tsconfig.json
+**/*.map
+**/*.ts
+!dist/**/*.js
+node_modules/**
+.eslintrc.json
+**/.DS_Store
+*.vsix
+
+# Build source files
+prompts/**
+agents/**
+protected/**
+scripts/test-*.js
+scripts/install-*.js
+scripts/verify.js
+
+# Keep build scripts
+!scripts/embed-prompts.js
+!scripts/embed-agents.js

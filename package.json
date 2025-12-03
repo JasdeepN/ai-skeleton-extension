@@ -1,0 +1,476 @@
+{
+  "name": "ai-skeleton-prompts",
+  "displayName": "AI Skeleton - Memory & Prompts",
+  "description": "Complete AI agent toolkit: Native memory management (AI-Memory), workflow prompts, MCP integration, and agent definitions.",
+  "version": "0.1.8",
+  "publisher": "JasdeepN",
+  "license": "SEE LICENSE IN LICENSE",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/JasdeepN/ai-skeleton-extension"
+  },
+  "engines": {
+    "vscode": "^1.95.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "configuration": {
+      "properties": {
+        "aiSkeleton.prompts.source": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "embedded",
+            "workspace"
+          ],
+          "default": "auto",
+          "description": "Choose prompt loading strategy. auto uses workspace .github/prompts if present else embedded copy."
+        },
+        "aiSkeleton.memory.autoStart": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically detect and initialize Memory Bank on startup. Shows prompt to create if not found."
+        },
+        "aiSkeleton.memory.showWelcome": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show welcome notification when Memory Bank is active on startup."
+        },
+        "aiSkeleton.mcp.autoStart": {
+          "type": "boolean",
+          "default": false,
+          "description": "Automatically start MCP servers defined in .vscode/mcp.json on startup. Prompts on first run."
+        }
+      }
+    },
+    "commands": [
+      {
+        "command": "aiSkeleton.listPrompts",
+        "title": "AI Skeleton: List Prompts"
+      },
+      {
+        "command": "aiSkeleton.openPrompt",
+        "title": "AI Skeleton: Open Prompt"
+      },
+      {
+        "command": "aiSkeleton.insertPrompt",
+        "title": "AI Skeleton: Insert Prompt at Cursor"
+      },
+      {
+        "command": "aiSkeleton.copyPrompt",
+        "title": "AI Skeleton: Copy Prompt to Clipboard"
+      },
+      {
+        "command": "aiSkeleton.savePrompt",
+        "title": "AI Skeleton: Save Prompt to File..."
+      },
+      {
+        "command": "aiSkeleton.installPrompts",
+        "title": "AI Skeleton: Install Built-in Prompts to Workspace (.github/prompts)"
+      },
+      {
+        "command": "aiSkeleton.installAgents",
+        "title": "AI Skeleton: Install Agent Templates to Workspace (.github/agents)"
+      },
+      {
+        "command": "aiSkeleton.installProtectedFiles",
+        "title": "AI Skeleton: Install Protected Files (.github)"
+      },
+      {
+        "command": "aiSkeleton.installPrompt",
+        "title": "AI Skeleton: Install Single Prompt to Workspace (.github/prompts)"
+      },
+      {
+        "command": "aiSkeleton.installAll",
+        "title": "AI Skeleton: Install All (Prompts, Agents, Protected)"
+      },
+      {
+        "command": "aiSkeleton.installMCPs",
+        "title": "AI Skeleton: Install MCP Servers (.vscode/mcp.json)"
+      },
+      {
+        "command": "aiSkeleton.tools.listRegistered",
+        "title": "AI Skeleton: List Registered LM Tools"
+      },
+      {
+        "command": "aiSkeleton.memory.showStatus",
+        "title": "AI Skeleton: Memory Bank Status"
+      },
+      {
+        "command": "aiSkeleton.memory.create",
+        "title": "AI Skeleton: Create Memory Bank"
+      },
+      {
+        "command": "aiSkeleton.memory.show",
+        "title": "AI Skeleton: Show Memory Summary"
+      },
+      {
+        "command": "aiSkeleton.memory.logDecision",
+        "title": "AI Skeleton: Log Decision"
+      },
+      {
+        "command": "aiSkeleton.memory.updateContext",
+        "title": "AI Skeleton: Update Context"
+      },
+      {
+        "command": "aiSkeleton.memory.updateProgress",
+        "title": "AI Skeleton: Update Progress"
+      },
+      {
+        "command": "aiSkeleton.memory.updatePatterns",
+        "title": "AI Skeleton: Update System Patterns"
+      },
+      {
+        "command": "aiSkeleton.memory.refresh",
+        "title": "Refresh",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "aiSkeleton.diagnostics.refresh",
+        "title": "AI Skeleton: Diagnostics Refresh",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "aiSkeleton.diagnostics.runSelfTest",
+        "title": "AI Skeleton: Run Diagnostics"
+      },
+      {
+        "command": "aiSkeleton.diagnostics.openReadme",
+        "title": "AI Skeleton: Open README"
+      }
+      ,
+      {
+        "command": "aiSkeleton.startMCPs",
+        "title": "AI Skeleton: Start MCP Servers"
+      }
+    ],
+    "languageModelTools": [
+      {
+        "name": "aiSkeleton_showMemory",
+        "displayName": "Show Memory Bank",
+        "toolReferenceName": "showMemory",
+        "icon": "$(database)",
+        "userDescription": "Read AI-Memory contents (context, decisions, progress, patterns)",
+        "canBeReferencedInPrompt": true,
+        "modelDescription": "Read and display memory bank contents. Use this to retrieve project context, decisions, progress, and patterns. Call this at the start of sessions to understand project state.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "file": {
+              "type": "string",
+              "description": "Optional: specific file to read (e.g., 'activeContext.md', 'decisionLog.md')"
+            }
+          }
+        },
+        "tags": [
+          "ai-skeleton",
+          "memory"
+        ]
+      },
+      {
+        "name": "aiSkeleton_logDecision",
+        "displayName": "Log Decision",
+        "toolReferenceName": "logDecision",
+        "icon": "$(note)",
+        "userDescription": "Log architectural or technical decisions with rationale",
+        "canBeReferencedInPrompt": true,
+        "modelDescription": "Log an architectural, technical, or project decision to the memory bank with timestamp. Use this AUTOMATICALLY after making any significant technical choice.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "decision": {
+              "type": "string",
+              "description": "The decision that was made"
+            },
+            "rationale": {
+              "type": "string",
+              "description": "The reasoning behind the decision"
+            }
+          },
+          "required": [
+            "decision",
+            "rationale"
+          ]
+        },
+        "tags": [
+          "ai-skeleton",
+          "memory"
+        ]
+      },
+      {
+        "name": "aiSkeleton_updateContext",
+        "displayName": "Update Context",
+        "toolReferenceName": "updateContext",
+        "icon": "$(edit)",
+        "userDescription": "Update active working context when focus shifts",
+        "canBeReferencedInPrompt": true,
+        "modelDescription": "Update the active context in memory bank when focus shifts to new tasks or features. Use this AUTOMATICALLY when starting new work or changing focus.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "context": {
+              "type": "string",
+              "description": "The context update to append"
+            }
+          },
+          "required": [
+            "context"
+          ]
+        },
+        "tags": [
+          "ai-skeleton",
+          "memory"
+        ]
+      },
+      {
+        "name": "aiSkeleton_updateProgress",
+        "displayName": "Update Progress",
+        "toolReferenceName": "updateProgress",
+        "icon": "$(checklist)",
+        "userDescription": "Track task completion (done/doing/next)",
+        "canBeReferencedInPrompt": true,
+        "modelDescription": "Update progress tracking after completing tasks or milestones. Use this AUTOMATICALLY after finishing work or starting new tasks.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "item": {
+              "type": "string",
+              "description": "The task or item to track"
+            },
+            "status": {
+              "type": "string",
+              "enum": [
+                "done",
+                "doing",
+                "next"
+              ],
+              "description": "The status of the item"
+            }
+          },
+          "required": [
+            "item",
+            "status"
+          ]
+        },
+        "tags": [
+          "ai-skeleton",
+          "memory"
+        ]
+      },
+      {
+        "name": "aiSkeleton_updatePatterns",
+        "displayName": "Update System Patterns",
+        "toolReferenceName": "updatePatterns",
+        "icon": "$(symbol-structure)",
+        "userDescription": "Record code patterns, conventions, and best practices",
+        "canBeReferencedInPrompt": true,
+        "modelDescription": "Record discovered or established patterns, conventions, or best practices. Use when discovering important architectural patterns or establishing conventions.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "pattern": {
+              "type": "string",
+              "description": "The pattern name"
+            },
+            "description": {
+              "type": "string",
+              "description": "Description of the pattern"
+            }
+          },
+          "required": [
+            "pattern",
+            "description"
+          ]
+        },
+        "tags": [
+          "ai-skeleton",
+          "memory"
+        ]
+      },
+      {
+        "name": "aiSkeleton_updateProjectBrief",
+        "displayName": "Update Project Brief",
+        "toolReferenceName": "updateBrief",
+        "icon": "$(book)",
+        "userDescription": "Update project goals, scope, features, or constraints",
+        "canBeReferencedInPrompt": true,
+        "modelDescription": "Update project brief when goals, scope, features, or constraints change. This file also contains product context.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "content": {
+              "type": "string",
+              "description": "The content to append to project brief"
+            }
+          },
+          "required": [
+            "content"
+          ]
+        },
+        "tags": [
+          "ai-skeleton",
+          "memory"
+        ]
+      },
+      {
+        "name": "aiSkeleton_markDeprecated",
+        "displayName": "Mark Deprecated",
+        "toolReferenceName": "markDeprecated",
+        "icon": "$(trash)",
+        "userDescription": "Mark patterns or decisions as deprecated without deletion",
+        "canBeReferencedInPrompt": true,
+        "modelDescription": "Mark a pattern, decision, or rule as deprecated without deleting it. Use for cleanup while preserving history.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "file": {
+              "type": "string",
+              "enum": [
+                "activeContext.md",
+                "decisionLog.md",
+                "progress.md",
+                "systemPatterns.md",
+                "projectBrief.md"
+              ],
+              "description": "The memory file to update"
+            },
+            "item": {
+              "type": "string",
+              "description": "The item to mark as deprecated"
+            },
+            "reason": {
+              "type": "string",
+              "description": "Reason for deprecation"
+            }
+          },
+          "required": [
+            "file",
+            "item",
+            "reason"
+          ]
+        },
+        "tags": [
+          "ai-skeleton",
+          "memory"
+        ]
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "aiSkeleton",
+          "title": "AI Skeleton",
+          "icon": "resources/icon.png"
+        }
+      ]
+    },
+    "views": {
+      "aiSkeleton": [
+        {
+          "id": "aiSkeletonDiagnostics",
+          "name": "Diagnostics",
+          "icon": "resources/ai-skeleton.svg"
+        }
+      ],
+      "explorer": [
+        {
+          "id": "aiSkeletonPrompts",
+          "name": "AI Skeleton Prompts",
+          "icon": "resources/ai-skeleton.svg"
+        },
+        {
+          "id": "aiSkeletonMemory",
+          "name": "AI-Memory",
+          "icon": "$(database)"
+        }
+      ]
+    },
+    "menus": {
+      "view/item/context": [
+        {
+          "command": "aiSkeleton.installPrompt",
+          "when": "view == aiSkeletonPrompts && viewItem == promptItem",
+          "group": "inline"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "aiSkeleton.diagnostics.refresh",
+          "when": "view == aiSkeletonDiagnostics",
+          "group": "navigation"
+        },
+        {
+          "command": "aiSkeleton.diagnostics.runSelfTest",
+          "when": "view == aiSkeletonDiagnostics",
+          "group": "navigation"
+        },
+        {
+          "command": "aiSkeleton.installAll",
+          "when": "view == aiSkeletonDiagnostics",
+          "group": "navigation"
+        },
+        {
+          "command": "aiSkeleton.installPrompts",
+          "when": "view == aiSkeletonPrompts",
+          "group": "navigation"
+        },
+        {
+          "command": "aiSkeleton.installAgents",
+          "when": "view == aiSkeletonPrompts",
+          "group": "navigation"
+        },
+        {
+          "command": "aiSkeleton.installProtectedFiles",
+          "when": "view == aiSkeletonPrompts",
+          "group": "navigation"
+        },
+        {
+          "command": "aiSkeleton.installAll",
+          "when": "view == aiSkeletonPrompts",
+          "group": "navigation"
+        },
+        {
+          "command": "aiSkeleton.memory.refresh",
+          "when": "view == aiSkeletonMemory",
+          "group": "navigation"
+        },
+        {
+          "command": "aiSkeleton.memory.create",
+          "when": "view == aiSkeletonMemory",
+          "group": "navigation"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "embed-prompts": "node scripts/embed-prompts.js",
+    "embed-agents": "node scripts/embed-agents.js",
+    "embed-all": "npm run embed-prompts && npm run embed-agents",
+    "build": "npm run embed-all && tsc -p .",
+    "compile": "tsc -p .",
+    "watch": "tsc -w",
+    "verify": "node scripts/verify.js",
+    "test:encoding": "node scripts/test-save-prompt.js",
+    "test:promptstore": "node scripts/test-prompt-store.js",
+    "test:install": "node scripts/install-embedded-prompts.js --dest=./tmp-prompt-install",
+    "test:install:single": "node scripts/install-embedded-prompt.js --dest=./tmp-install-single --id=checkpoint",
+    "test:install:agents": "node scripts/install-embedded-agents.js --dest=./tmp-agent-install",
+    "test:install:protected": "node scripts/install-embedded-protected.js --dest=./tmp-protected-install",
+    "package:vsix": "node scripts/package-vsix.js"
+  },
+  "devDependencies": {
+    "@types/node": "^20.8.0",
+    "@types/vscode": "^1.95.0",
+    "typescript": "^5.3.0",
+    "vsce": "^2.15.0"
+  },
+  "dependencies": {
+    "minimist": "^1.2.8"
+  }
+}

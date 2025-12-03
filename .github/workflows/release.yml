@@ -1,0 +1,61 @@
+name: Release VSIX
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Use Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build (embed assets + compile)
+        run: npm run build
+
+      - name: Package VSIX (no version bump)
+        run: node scripts/package-vsix.js --noBump
+
+      - name: Locate VSIX artifact
+        id: find_vsix
+        shell: bash
+        run: |
+          set -e
+          VSIX=$(ls -1 **/*.vsix | head -n 1 || true)
+          echo "vsix_path=$VSIX" >> $GITHUB_OUTPUT
+          if [ -z "$VSIX" ]; then
+            echo "No VSIX file found." >&2
+            exit 1
+          fi
+
+      - name: Upload VSIX as build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ai-skeleton-vsix
+          path: ${{ steps.find_vsix.outputs.vsix_path }}
+
+      - name: Create GitHub Release and attach VSIX
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ steps.find_vsix.outputs.vsix_path }}
+          draft: false
+          make_latest: true
+          generate_release_notes: true

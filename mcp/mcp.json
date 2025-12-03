@@ -1,0 +1,45 @@
+{
+	"$schema": "https://json-schema.org/draft/2020-12/schema",
+	"inputs": [
+		{
+			"id": "context7_api_key",
+			"type": "promptString",
+			"description": "Context7 API key (optional; increases rate limits). Get one at https://context7.com/dashboard",
+			"password": true
+		}
+	],
+	"servers": {
+		"upstash/context7": {
+			"type": "http",
+			"url": "https://mcp.context7.com/mcp",
+			"headers": {
+				"CONTEXT7_API_KEY": "${input:context7_api_key}"
+			},
+			"gallery": "https://api.mcp.github.com/2025-09-15/v0/servers/dcec7705-b81b-4e0f-8615-8032604be7ad",
+			"version": "1.0.0"
+		},
+		"sequential-thinking": {
+			"command": "npx",
+			"args": [
+				"-y",
+				"@modelcontextprotocol/server-sequential-thinking"
+			]
+		},
+		"filesystem": {
+			"command": "npx",
+			"args": [
+				"-y",
+				"@modelcontextprotocol/server-filesystem",
+				"${workspaceFolder}"
+			]
+		},
+		"fetch": {
+			"command": "uvx",
+			"args": ["mcp-server-fetch"]
+		},
+		"git": {
+			"command": "uvx",
+			"args": ["mcp-server-git"]
+		}
+	}
+}
