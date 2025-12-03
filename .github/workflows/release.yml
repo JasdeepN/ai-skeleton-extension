@@ -58,3 +58,11 @@ jobs:
           draft: false
           make_latest: true
           generate_release_notes: true
+
+      - name: Publish to VS Code Marketplace
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          npm install -g @vscode/vsce
+          vsce publish -p ${{ secrets.VSCE_PAT }} --packagePath ${{ steps.find_vsix.outputs.vsix_path }}
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
