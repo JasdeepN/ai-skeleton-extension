@@ -2,14 +2,29 @@
 
 **⚠️ CRITICAL: THIS FILE IS READ-ONLY ⚠️**
 **DO NOT MODIFY THIS PROMPT FILE. It is a template for agent workflows.**
-**All work, plans, and context must be saved to AI-Memory/, NOT here.**
 
+## ⛔ PLANNING ONLY - NO CODE EDITING
+
+**This prompt is for PLANNING and TASK BREAKDOWN only.**
+- **DO NOT** create, edit, or modify any code files
+- **DO NOT** create separate documentation files
+- **ALL output MUST go through aiSkeleton memory tools**
+
+| Output Type | Required Tool |
+|-------------|---------------|
+| Plans/Tasks | `aiSkeleton_updateProgress` |
+| Context | `aiSkeleton_updateContext` |
+| Decisions | `aiSkeleton_logDecision` |
+
+**When planning is complete:** State "Planning complete. Handoff to Execute mode for implementation."
+
+---
 
 ## Instructions
 
-Use this prompt to break down any complex task into actionable steps, assign #todos for each, and utilize available tools for tracking and execution. Each step should be clear, specific, and saved to Memory for progress tracking.
+Use this prompt to break down any complex task into actionable steps, assign #todos for each, and utilize available tools for tracking and execution. Each step should be clear, specific, and saved to Memory via aiSkeleton tools.
 
-**Important:** This prompt template is for planning only. All generated plans, tasks, and progress must be saved to the Memory Management system, NOT to this prompt file.
+**Important:** This prompt template is for planning only. All generated plans, tasks, and progress must be saved via aiSkeleton memory tools.
 
 ---
 

@@ -8,6 +8,7 @@ import { registerMemoryTreeView } from './memoryTreeProvider';
 import { getMCPConfigString, getMCPServerList } from './mcpStore';
 import { registerDiagnosticsView } from './diagnosticsProvider';
 import { maybeAutoStartMCPs, startMCPServers } from './mcpManager';
+import { showSetupDialog, checkForUpdates, reinstallAll } from './setupService';
 
 async function resolvePrompts(): Promise<Prompt[]> {
   const source = vscode.workspace.getConfiguration().get<'auto'|'embedded'|'workspace'>('aiSkeleton.prompts.source', 'auto');
@@ -15,35 +16,29 @@ async function resolvePrompts(): Promise<Prompt[]> {
 }
 
 export async function activate(context: vscode.ExtensionContext) {
-  // Initialize memory service with auto-start
+  // Initialize memory service
   const memoryService = getMemoryService();
   await memoryService.detectMemoryBank();
 
-  // Auto-start: Show welcome notification and offer to create memory bank if not found
-  const config = vscode.workspace.getConfiguration('aiSkeleton');
-  const autoStartMemory = config.get<boolean>('memory.autoStart', true);
-  
-  if (autoStartMemory && !memoryService.state.active) {
-    // Check if we have a workspace open
-    if (vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length > 0) {
-      const action = await vscode.window.showInformationMessage(
-        'Memory Bank not found. Create one for AI context persistence?',
-        'Create Memory Bank',
-        'Not Now',
-        'Don\'t Ask Again'
-      );
-      
-      if (action === 'Create Memory Bank') {
-        await memoryService.createMemoryBank();
-        vscode.window.showInformationMessage('✓ Memory Bank created! AI agents can now persist context.');
-      } else if (action === 'Don\'t Ask Again') {
-        await config.update('memory.autoStart', false, vscode.ConfigurationTarget.Global);
-      }
+  // Show unified setup dialog if components are missing
+  // This replaces the old AI-Memory-only prompt with a comprehensive setup
+  await showSetupDialog(context);
+
+  // Check for updates to installed components
+  const hasUpdates = await checkForUpdates(context);
+  if (hasUpdates) {
+    const action = await vscode.window.showInformationMessage(
+      'AI Skeleton extension updated. Update installed components?',
+      'Update (Preserve Customizations)',
+      'Skip'
+    );
+    if (action === 'Update (Preserve Customizations)') {
+      await reinstallAll(context);
     }
-  } else if (autoStartMemory && memoryService.state.active) {
-    // Silent notification that memory is active (optional status bar update is enough)
-    console.log('[AI Skeleton] Memory Bank auto-started:', memoryService.state.path?.fsPath);
   }
+
+  // Re-detect memory after potential setup
+  await memoryService.detectMemoryBank();
 
   // Register memory LM tools (for Copilot agent integration)
   // Uses VS Code Language Model Tools API (stable in VS Code 1.95+)

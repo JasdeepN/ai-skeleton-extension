@@ -32,6 +32,11 @@
           "default": "auto",
           "description": "Choose prompt loading strategy. auto uses workspace .github/prompts if present else embedded copy."
         },
+        "aiSkeleton.setup.showPrompt": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show setup prompt on startup when components are missing. Offers to install AI-Memory, prompts, agents, and protected files."
+        },
         "aiSkeleton.memory.autoStart": {
           "type": "boolean",
           "default": true,

@@ -1,5 +1,36 @@
 # Changelog
 
+## 0.1.21 - 2025-12-04
+
+### Added
+- **GUARDRAILS.md**: New AI agent safety restrictions file with protected file lists, forbidden operations, and user-extensible rules
+- **setupService.ts**: Unified setup dialog with smart merge capability for agent/prompt files
+  - `detectMissingComponents()` scans workspace for missing AI components
+  - `showSetupDialog()` presents QuickPick multi-select for installation
+  - `smartInstallFile()` merges SYSTEM sections while preserving USER customizations
+  - `wrapWithSections()` auto-adds markers on first install
+
+### Changed
+- **Agent Tool Separation**: Research agents can no longer edit code
+  - `memory-deep-think.agent.md`: Removed edit tools, added RESEARCH-ONLY restrictions
+  - `memory-mcp-research.agent.md`: Removed edit tools, added RESEARCH-ONLY restrictions
+  - `memory-prompt.agent.md`: Now the ONLY agent with code editing capabilities (EXECUTION MODE)
+- **Research Output Mandate**: All research documentation must use aiSkeleton memory tools exclusively
+  - Research briefs → `aiSkeleton_updateProjectBrief`
+  - Context updates → `aiSkeleton_updateContext`
+  - Decisions → `aiSkeleton_logDecision`
+  - Progress → `aiSkeleton_updateProgress`
+  - Patterns → `aiSkeleton_updatePatterns`
+- **Prompt Updates**: Added explicit research-only headers
+  - `Think.prompt.md`: Added "⛔ RESEARCH ONLY - NO CODE EDITING" section with tool mapping table
+  - `Plan.prompt.md`: Added "⛔ PLANNING ONLY - NO CODE EDITING" section
+
+### Technical
+- Fixed agent handoffs format (must be objects with label/agent/prompt, not strings)
+- Fixed wildcard tool references (must use explicit tool names, not wildcards)
+- Added documentation tables to all agents showing memory tool mappings
+- Re-embedded all prompts and agents with latest updates
+
 ## 0.1.20 - 2025-12-04
 
 ### Fixed

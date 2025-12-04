@@ -2,8 +2,25 @@
 
 **⚠️ CRITICAL: THIS FILE IS READ-ONLY ⚠️**
 **DO NOT MODIFY THIS PROMPT FILE. It is a template for agent workflows.**
-**All work, plans, and context must be saved to AI-Memory/, NOT here.**
 
+## ⛔ RESEARCH ONLY - NO CODE EDITING
+
+**This prompt is for RESEARCH and ANALYSIS only.**
+- **DO NOT** create, edit, or modify any code files
+- **DO NOT** create separate documentation files
+- **ALL output MUST go through aiSkeleton memory tools**
+
+| Output Type | Required Tool |
+|-------------|---------------|
+| Research Briefs | `aiSkeleton_updateProjectBrief` |
+| Context/Focus | `aiSkeleton_updateContext` |
+| Decisions | `aiSkeleton_logDecision` |
+| Progress | `aiSkeleton_updateProgress` |
+| Patterns | `aiSkeleton_updatePatterns` |
+
+**When research is complete:** State "Research complete. Handoff to Execute mode for implementation."
+
+---
 
 ## Purpose
 
@@ -13,7 +30,7 @@ This prompt facilitates deep research and analysis **before** planning begins. U
 ```
 Think (Research & Analysis) → Plan (Breakdown & Tasks) → Execute (Implementation)
                 ↓
-        Memory Management (Context Storage)
+        Memory Management (via aiSkeleton tools ONLY)
 ```
 
 ---
