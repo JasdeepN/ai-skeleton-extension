@@ -156,7 +156,7 @@ END WHILE
    - Full test suite execution
    - End-to-end testing
    - Performance validation
-   - SEO/accessibility checks (for web)
+   - Project-specific quality checks (as applicable)
    - **MANDATORY: Production build + full smoke test suite**
 
 **Test Failure Protocol:**

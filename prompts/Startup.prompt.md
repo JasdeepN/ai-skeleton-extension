@@ -38,7 +38,7 @@ description: Startup prompt for new chat sessions
    ls -la
    ```
    - Identify project type (extension, web app, library, CLI tool, etc.)
-   - Map directory structure (src/, lib/, app/, components/, etc.)
+   - Map directory structure (common patterns: `src/`, `lib/`, `dist/`, `test/`, etc.)
    - Locate configuration files (package.json, tsconfig.json, etc.)
    - Find documentation (README.md, CONTRIBUTING.md, docs/)
 
@@ -58,10 +58,10 @@ description: Startup prompt for new chat sessions
 4. **Technology Stack Inventory**
    - Programming language(s) and versions
    - Frameworks and major libraries
-   - Build tools (webpack, vite, esbuild, tsc, etc.)
-   - Testing frameworks (jest, vitest, playwright, etc.)
-   - Development tools (ESLint, Prettier, etc.)
-   - Deployment/CI/CD (GitHub Actions, etc.)
+   - Build tools (webpack, vite, esbuild, tsc, rollup, etc.)
+   - Testing frameworks (jest, vitest, mocha, pytest, etc.)
+   - Development tools (ESLint, Prettier, formatters, linters, etc.)
+   - Deployment/CI/CD (GitHub Actions, GitLab CI, Jenkins, etc.)
 
 ### Phase 2: Architecture & Pattern Analysis
 
@@ -84,8 +84,8 @@ description: Startup prompt for new chat sessions
    - External APIs or services
    - Database or storage systems
    - Third-party libraries and their purposes
-   - VS Code APIs (if extension)
-   - Web APIs (if web app)
+   - Platform-specific APIs (if applicable)
+   - Runtime environment integrations
 
 ### Phase 3: Memory Bank Initialization
 

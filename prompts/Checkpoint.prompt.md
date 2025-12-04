@@ -28,7 +28,7 @@ Run this checkpoint at the end of a coding session or when significant work has 
 2. **Gather session context**:
    - Review recent git changes: `git status` and `git diff`
    - Check for new or modified files in key directories:
-     - `app/`, `components/`, `lib/`
+     - Source directories (`src/`, `lib/`, etc.)
      - Configuration files (`.github/`, `.vscode/`, root configs)
    - Note any test runs, builds, or deployments attempted
 
@@ -73,9 +73,9 @@ Check if any workflow or instruction files need updates:
 2. **Review `.vscode/settings.json`** and `mcp.json` for tooling updates
 3. **Review root configuration files**:
    - `package.json` - dependency changes
-   - `next.config.js` - build configuration
-   - `tsconfig.json` - TypeScript settings
-   - `jest.config.cjs`, `playwright.config.ts` - testing configs
+   - Build configuration files - framework-specific settings
+   - `tsconfig.json` / language config - compiler/interpreter settings
+   - Test configuration files - testing framework settings
 
 4. **Document recommendations**:
    - Workflow improvements discovered
@@ -144,10 +144,10 @@ chore(memory): update memory bank checkpoint workflow
 
 - Added comprehensive checkpoint prompt for session reviews
 - Updated progress tracking with recent test coverage work
-- Documented Next.js 15.5.6 build blocker decision
-- Enhanced system patterns with R2 fallback details
+- Documented build configuration decision
+- Enhanced system patterns with fallback strategy details
 
-Related to ongoing gallery and deployment workflow improvements.
+Related to ongoing feature development and deployment workflow improvements.
 ```
 
 ### Step 6: Validation

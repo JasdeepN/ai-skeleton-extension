@@ -253,20 +253,20 @@ aiSkeleton_updateProgress "Next: Plan implementation of <feature>"
 #WebResearch best practices for <technology/pattern>
 - Compare: alternatives and trade-offs
 - Review: community adoption and support
-- Check: compatibility with Next.js 15.x
+- Check: compatibility with current project stack
 ```
 
-### For SEO & Performance
+### For Performance Optimization
 ```
-#WebResearch SEO optimization for <specific aspect>
-- Focus: Core Web Vitals, local SEO
-- Target: Toronto/GTA market
-- Consider: Cloudflare edge optimization
+#WebResearch <performance aspect> optimization for <technology>
+- Focus: Core metrics, best practices
+- Target: Project requirements
+- Consider: Infrastructure constraints
 ```
 
 ### For Standards & Compliance
 ```
-#WebResearch schema.org LocalBusiness requirements
+#WebResearch <standard/specification> requirements
 - Validate: required fields
 - Check: best practices
 - Review: examples and implementations
@@ -300,29 +300,29 @@ aiSkeleton_updateProgress "Next: Plan implementation of <feature>"
 
 ## Example: Feature Research Flow
 
-**Scenario:** Add image gallery with Cloudflare R2 integration
+**Scenario:** Add image gallery with cloud storage integration
 
 ### 1. Problem Understanding
 ```
-#DeepThink analyze "Image gallery with R2 fallback requirements"
+#DeepThink analyze "Image gallery with cloud storage fallback requirements"
 ```
 
 **Output:**
-- Need: Portfolio image gallery
-- Constraint: Cloudflare R2 for storage
-- Requirement: Fallback to local for dev
+- Need: Image gallery feature
+- Constraint: Cloud storage for production
+- Requirement: Fallback to local for development
 - Success: Fast load, lazy loading, responsive
 
 ### 2. Research
 ```
 aiSkeleton_updateContext "Query image optimization patterns"
-#WebResearch "Next.js image optimization with Cloudflare R2"
+#WebResearch "Image optimization with cloud storage integration"
 ```
 
 **Findings:**
-- next/image supports custom loaders
-- R2 requires authentication setup
-- Fallback can use public folder
+- Image framework supports custom loaders
+- Cloud storage requires authentication setup
+- Fallback can use local storage
 - Consider: image transformations
 
 ### 3. Solution Exploration
@@ -331,16 +331,16 @@ aiSkeleton_updateContext "Query image optimization patterns"
 ```
 
 **Options:**
-1. Direct R2 integration with signed URLs
-2. Cloudflare Images service
-3. Hybrid approach (R2 + local fallback)
+1. Direct cloud integration with signed URLs
+2. CDN-based image service
+3. Hybrid approach (cloud + local fallback)
 
 **Recommendation:** Hybrid (documented in systemPatterns.md)
 
 ### 4. Research Brief
 ```
 aiSkeleton_updatePatterns {
-  "pattern": "R2 Image Gallery",
+  "pattern": "Cloud Image Gallery",
   "context": "Loader implementation, Fallback strategy, Environment configuration, Testing approach"
 }
 ```
@@ -353,7 +353,7 @@ aiSkeleton_updatePatterns {
 
 ### 5. Handoff to Planning
 ```
-aiSkeleton_updateProgress "Done: R2 gallery research; Next: Plan implementation"
+aiSkeleton_updateProgress "Done: Image gallery research; Next: Plan implementation"
 ```
 
 **Plan.prompt.md receives:**
