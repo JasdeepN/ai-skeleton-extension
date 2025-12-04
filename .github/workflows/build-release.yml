@@ -1,13 +1,20 @@
 name: Build and Release - Stage 1 (Embed, Build, Verify)
 
-# Automatically triggered when code is merged to main
-# Runs: embed-all → compile → verify embeddings
+# Auto-triggered when code is merged to main
+# Can also be manually triggered for force builds
+# Runs: embed-all → compile → verify embeddings → package VSIX
 # Does NOT push or commit - outputs ready for publishing
 
 on:
   push:
     branches:
       - main
+  workflow_dispatch:
+    inputs:
+      note:
+        description: 'Optional note for manual trigger (e.g., "force rebuild for 0.1.20")'
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -78,7 +85,17 @@ jobs:
           echo "  - Verified all embeddings"
           echo "  - Packaged VSIX"
           echo ""
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "🔨 Trigger: Manual dispatch"
+            if [ -n "${{ github.event.inputs.note }}" ]; then
+              echo "📝 Note: ${{ github.event.inputs.note }}"
+            fi
+          else
+            echo "🔄 Trigger: Auto (push to main)"
+          fi
+          echo ""
           echo "🚀 Next: Run Stage 2 (Publish) workflow to:"
+          echo "  - Download this VSIX artifact"
           echo "  - Create tag v${{ steps.version.outputs.version }}"
           echo "  - Create GitHub Release"
           echo "  - Publish to VS Code Marketplace"
