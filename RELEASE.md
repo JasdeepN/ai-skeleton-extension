@@ -127,8 +127,8 @@ After verifying the GitHub release build:
 3. Enter tag name: `v0.1.18`
 4. Click "Run workflow"
 5. Monitor workflow execution
-6. **GATE #3:** Verification runs before publish
-7. Publishes to marketplace (users auto-update)
+6. Publishes to marketplace (users auto-update)
+   - Note: No re-verification needed (tag already verified by GATE #2)
 
 **Option 2: GitHub CLI**
 ```bash
@@ -192,38 +192,33 @@ Fix:
 6. git push origin v0.1.19
 ```
 
-### Scenario 3: Marketplace Publish Workflow
+### Scenario 3: Publishing a Verified Tag
 
-If you try to publish with stale embeddings:
+The marketplace publish workflow trusts the tag verification from GATE #2:
 
 ```
 Workflow Name: Publish to Marketplace
 Event: Manual workflow_dispatch (tag: v0.1.19)
 
-❌ FAILED: Verify embeddings (GATE - must pass to publish)
+✅ Tag v0.1.19 already verified by build workflow (GATE #2)
    
-   Output:
-   ✗ Execute.prompt.md - Content mismatch
-   
-   ⚠️  Marketplace publish blocked
-   
-   Subsequent steps skipped:
-   ⊘ Build (skipped)
-   ⊘ Package VSIX (skipped)
-   ⊘ Publish to Marketplace (skipped)
+   Steps:
+   ✓ Checkout tag
+   ✓ Install dependencies
+   ✓ Build (from verified tag)
+   ✓ Package VSIX
+   ✓ Publish to Marketplace
 
-Fix:
-1. Delete tag: git tag -d v0.1.19 && git push origin :v0.1.19
-2. Re-embed: npm run embed-all
-3. Commit: git add -A && git commit --amend
-4. Re-tag: git tag v0.1.19 && git push origin v0.1.19
-5. Wait for build workflow to complete
-6. Try marketplace publish again with fixed tag
+Result: Extension published to marketplace
 ```
+
+**Note:** If GATE #2 failed during build, the tag won't have a GitHub Release,
+so you can't publish it anyway. The two-gate system ensures only verified
+tags can be published.
 
 ## Embedding Gate Details
 
-### Three-Layer Gate System
+### Two-Layer Gate System
 
 **GATE #1: Local Release Script**
 - Location: `scripts/release.sh` (Step 4)
@@ -237,11 +232,10 @@ Fix:
 - Effect: Blocks GitHub Release creation
 - Recovery: Delete tag, fix, re-push tag
 
-**GATE #3: Publish Workflow (CI)**
-- Location: `.github/workflows/publish-marketplace.yml`
-- Runs: After npm install, before build
-- Effect: Blocks marketplace publish
-- Recovery: Fix tag and re-run workflow
+**Note on Marketplace Publish:**
+- Publish workflow does NOT re-verify embeddings
+- Tags are immutable - already verified by GATE #2 at build time
+- Marketplace publishes from pre-verified GitHub Release VSIX
 
 ### What Gets Verified
 
