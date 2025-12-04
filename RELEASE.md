@@ -70,81 +70,76 @@ The embedding verification gate prevents stale assets from being released to use
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-## Release Methods
+## Two-Stage Release Methods
 
-### Option A: Automated Release Script (Recommended)
+### Stage 1: Git Release (Automated or Manual)
 
-Handles everything with embedded gates:
+#### Method A: Automated Script (Recommended)
 
 ```bash
-./scripts/release.sh 0.1.19
+./scripts/release.sh 0.1.18
 ```
 
 **What it does:**
-1. ✓ Updates version in package.json
-2. ✓ Runs `npm run embed-all`
-3. ✓ Builds extension
-4. ✓ **GATE**: Verifies embeddings (`npm run test:verify-embeddings`)
-5. ✓ Prompts to update CHANGELOG.md
-6. ✓ Commits changes
-7. ✓ Pushes to main
-8. ✓ Creates and pushes tag v0.1.19
-9. ↪ Triggers workflow → marketplace publish
+1. Updates `package.json` version to 0.1.18
+2. Re-embeds prompts and agents (`npm run embed-all`)
+3. Builds extension (`npm run compile`)
+4. **GATE #1:** Runs `npm run test:verify-embeddings` (blocks if stale)
+5. Prompts you to update CHANGELOG.md
+6. Commits changes to git
+7. Pushes to `origin/main`
+8. Creates and pushes tag `v0.1.18`
+9. **GitHub Actions builds release automatically** (build-release.yml)
+   - **GATE #2:** Runs verification again in CI
+   - Builds VSIX
+   - Creates GitHub Release with VSIX attached
+   - **Does NOT publish to marketplace**
 
-**Fails if:**
-- Version format invalid
-- npm run embed-all fails
-- Embedding verification fails (GATE)
-
-### Option B: Manual Tag Release
-
-For quick releases with minimal changes:
+#### Method B: Manual Tag Push
 
 ```bash
-# 1. Make changes
-nano prompts/Think.prompt.md
-
-# 2. Re-embed
+# 1. Update version, embed, build locally
 npm run embed-all
+npm run compile
+npm run test:verify-embeddings  # Optional pre-check
 
-# 3. Verify (GATE)
-npm run test:verify-embeddings
+# 2. Commit changes
+git add .
+git commit -m "chore: release v0.1.18"
 
-# 4. If ✓, commit and tag
-git add -A
-git commit -m "fix: update Think prompt"
-git tag v0.1.19
-git push origin main v0.1.19
+# 3. Push to main
+git push origin main
+
+# 4. Create and push tag
+git tag v0.1.18
+git push origin v0.1.18
 ```
 
-## Pre-Release Checklist
+GitHub Actions build triggers on tag push (same as Method A).
 
-**Before running release script or tagging:**
+### Stage 2: Marketplace Publish (Manual Only)
 
-- [ ] All code changes committed to `main`
-- [ ] Prompts/agents/protected files updated (if applicable)
-- [ ] Run `npm run embed-all` to re-embed
-- [ ] Run `npm run test:verify-embeddings` to verify (GATE #1)
-- [ ] Verify no uncommitted changes: `git status`
-- [ ] Update CHANGELOG.md with release notes
-- [ ] Verify version bump is correct: `grep "version" package.json`
+After verifying the GitHub release build:
 
-**Example:**
+**Option 1: GitHub Actions UI (Recommended)**
+1. Go to: https://github.com/JasdeepN/ai-skeleton-extension/actions/workflows/publish-marketplace.yml
+2. Click "Run workflow" button
+3. Enter tag name: `v0.1.18`
+4. Click "Run workflow"
+5. Monitor workflow execution
+6. **GATE #3:** Verification runs before publish
+7. Publishes to marketplace (users auto-update)
 
+**Option 2: GitHub CLI**
 ```bash
-# After editing prompts
-npm run embed-all
+gh workflow run publish-marketplace.yml -f tag=v0.1.18
+```
 
-# Verify gate (required)
-npm run test:verify-embeddings
-
-# If ✓, continue
-npm run compile
-git add -A
-git commit -m "docs: update prompts for v0.1.19"
-
-# Start release
-./scripts/release.sh 0.1.19
+**Option 3: Manual vsce publish**
+```bash
+# Download VSIX from GitHub Release
+# Then publish manually:
+npx @vscode/vsce publish --packagePath ./ai-skeleton-extension-0.1.18.vsix
 ```
 
 ## What Happens if Embedding Verification Fails
@@ -167,12 +162,12 @@ $ npm run test:verify-embeddings
 $ ./scripts/release.sh 0.1.19  # Try again
 ```
 
-### Scenario 2: GitHub Actions Workflow
+### Scenario 2: GitHub Actions Build Workflow
 
 If embeddings are stale when tag is pushed:
 
 ```
-Workflow Name: Release VSIX
+Workflow Name: Build and GitHub Release
 Event: v0.1.19 tag pushed
 
 ❌ FAILED: Verify embeddings (GATE - must pass to release)
@@ -187,7 +182,6 @@ Event: v0.1.19 tag pushed
    ⊘ Package VSIX (skipped)
    ⊘ Upload artifact (skipped)
    ⊘ Create GitHub Release (skipped)
-   ⊘ Publish to Marketplace (skipped)
 
 Fix:
 1. git tag -d v0.1.19 && git push origin :v0.1.19
@@ -198,7 +192,56 @@ Fix:
 6. git push origin v0.1.19
 ```
 
+### Scenario 3: Marketplace Publish Workflow
+
+If you try to publish with stale embeddings:
+
+```
+Workflow Name: Publish to Marketplace
+Event: Manual workflow_dispatch (tag: v0.1.19)
+
+❌ FAILED: Verify embeddings (GATE - must pass to publish)
+   
+   Output:
+   ✗ Execute.prompt.md - Content mismatch
+   
+   ⚠️  Marketplace publish blocked
+   
+   Subsequent steps skipped:
+   ⊘ Build (skipped)
+   ⊘ Package VSIX (skipped)
+   ⊘ Publish to Marketplace (skipped)
+
+Fix:
+1. Delete tag: git tag -d v0.1.19 && git push origin :v0.1.19
+2. Re-embed: npm run embed-all
+3. Commit: git add -A && git commit --amend
+4. Re-tag: git tag v0.1.19 && git push origin v0.1.19
+5. Wait for build workflow to complete
+6. Try marketplace publish again with fixed tag
+```
+
 ## Embedding Gate Details
+
+### Three-Layer Gate System
+
+**GATE #1: Local Release Script**
+- Location: `scripts/release.sh` (Step 4)
+- Runs: Before CHANGELOG prompt
+- Effect: Blocks release at developer machine
+- Recovery: Fix and re-run script
+
+**GATE #2: Build Workflow (CI)**
+- Location: `.github/workflows/build-release.yml`
+- Runs: After npm install, before build
+- Effect: Blocks GitHub Release creation
+- Recovery: Delete tag, fix, re-push tag
+
+**GATE #3: Publish Workflow (CI)**
+- Location: `.github/workflows/publish-marketplace.yml`
+- Runs: After npm install, before build
+- Effect: Blocks marketplace publish
+- Recovery: Fix tag and re-run workflow
 
 ### What Gets Verified
 

@@ -1,0 +1,8 @@
+{
+  "testEnvironment": "node",
+  "testMatch": ["**/tests/**/*.test.js"],
+  "collectCoverageFrom": ["scripts/**/*.js", "src/**/*.ts"],
+  "coveragePathIgnorePatterns": ["/node_modules/", "/dist/", "/vsix/"],
+  "verbose": true,
+  "maxWorkers": "50%"
+}
