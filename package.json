@@ -489,6 +489,7 @@
     "vsce": "^2.15.0"
   },
   "dependencies": {
-    "minimist": "^1.2.8"
+    "minimist": "^1.2.8",
+    "sql.js": "^1.12.0"
   }
 }
