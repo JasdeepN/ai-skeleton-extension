@@ -162,6 +162,52 @@ Before completing:
 - [ ] Commit message follows conventional commits format
 - [ ] Recommendations are actionable and specific
 
+### Step 7: Cleanup & Archive
+
+Organize completed work and remove temporary files:
+
+1. **Identify Temporary Files**
+   - Search workspace for temp files created during Think/Plan/Execute phases:
+     - Research briefs (temporary markdown files)
+     - Draft plans (if saved locally)
+     - Working notes (if any)
+     - Build artifacts or cache files
+   - Do NOT delete files in `.github/`, source code, or config files
+
+2. **Create Archive Structure**
+   ```bash
+   AI-Memory/archive/YYYY-MM-DD-<tag>/
+   ├── research/          # Completed research documents
+   ├── plans/             # Completed execution plans
+   ├── notes/             # Working notes from session
+   └── summary.md         # Session checkpoint summary
+   ```
+
+3. **Move Completed Research & Plans**
+   - Move any research brief files to `AI-Memory/archive/<date-tag>/research/`
+   - Move any execution plan documents to `AI-Memory/archive/<date-tag>/plans/`
+   - Move working notes to `AI-Memory/archive/<date-tag>/notes/`
+   - Preserve original structure and naming for audit trail
+
+4. **Remove Temporary Files**
+   - Delete temporary markdown files from workspace root
+   - Clean up draft files not in version control
+   - Remove build artifacts or cache directories
+   - Verify with `git status` that only actual source changes remain
+
+5. **Update Active Memory**
+   ```
+   aiSkeleton_updateContext "Cleanup complete: Session archived to AI-Memory/archive/<date-tag>; Workspace cleaned"
+   ```
+
+6. **Verification Checklist**
+   - [ ] Archive directory created with proper date-tag structure
+   - [ ] All completed research/plans moved to archive
+   - [ ] Temporary files removed from workspace
+   - [ ] `git status` shows only intentional changes
+   - [ ] No untracked files except .gitignore'd items
+   - [ ] Memory bank updated with archive location
+
 ## Usage
 
 To run this checkpoint:
