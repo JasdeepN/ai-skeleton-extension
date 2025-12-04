@@ -1,6 +1,7 @@
 {
   "testEnvironment": "node",
-  "testMatch": ["**/tests/**/*.test.js"],
+  "testMatch": ["**/tests/**/*.test.js", "!**/tests/e2e/**"],
+  "testPathIgnorePatterns": ["/node_modules/", "/dist/tests/e2e/"],
   "collectCoverageFrom": ["scripts/**/*.js", "src/**/*.ts"],
   "coveragePathIgnorePatterns": ["/node_modules/", "/dist/", "/vsix/"],
   "verbose": true,
