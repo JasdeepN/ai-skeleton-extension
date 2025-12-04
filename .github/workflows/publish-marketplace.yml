@@ -1,19 +1,20 @@
 name: Release - Stage 2 (Tag, Release, Publish to Marketplace)
 
 # Manual trigger AFTER Stage 1 completes
-# Downloads VSIX from Stage 1 build, creates tag, GitHub Release, and publishes to marketplace
+# Downloads VSIX artifact from Stage 1 build, creates tag, GitHub Release, publishes to marketplace
 # Usage:
 #   1. Ensure Stage 1 workflow has completed successfully on main
 #   2. Go to Actions tab → "Release - Stage 2" workflow
 #   3. Click "Run workflow"
-#   4. Enter the version (e.g., 0.1.20) - will create tag v0.1.20
-#   5. Workflow creates GitHub Release and publishes to marketplace
+#   4. Enter the version (e.g., 0.1.20) that Stage 1 just built
+#   5. Workflow downloads VSIX, creates tag, GitHub Release, publishes to marketplace
+#   6. For downgrade: provide older version (e.g., 0.1.19) to publish previous release
 
 on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version to publish (e.g., 0.1.20). Must match package.json version on main.'
+        description: 'Version to publish (e.g., 0.1.20). Must match Stage 1 build version.'
         required: true
         type: string
 
@@ -36,12 +37,13 @@ jobs:
           PACKAGE_VERSION=$(jq -r '.version' package.json)
           
           if [ "$VERSION" != "$PACKAGE_VERSION" ]; then
-            echo "❌ Error: Input version $VERSION does not match package.json version $PACKAGE_VERSION"
-            exit 1
+            echo "⚠️  Version mismatch (for downgrades): input=$VERSION, main=$PACKAGE_VERSION"
+            echo "Proceeding with downgrade to $VERSION"
+          else
+            echo "✅ Version verified: $VERSION"
           fi
-          echo "✅ Version verified: $VERSION"
 
-      - name: Download VSIX from Stage 1
+      - name: Download VSIX artifact from Stage 1
         uses: actions/download-artifact@v4
         with:
           name: ai-skeleton-vsix-${{ github.event.inputs.version }}
@@ -53,7 +55,8 @@ jobs:
         run: |
           VSIX=$(ls -1 vsix-download/*.vsix | head -n 1 || true)
           if [ -z "$VSIX" ]; then
-            echo "❌ No VSIX file found from Stage 1"
+            echo "❌ No VSIX file found from Stage 1 artifact"
+            echo "Expected artifact name: ai-skeleton-vsix-${{ github.event.inputs.version }}"
             exit 1
           fi
           echo "vsix_path=$VSIX" >> $GITHUB_OUTPUT
@@ -96,6 +99,7 @@ jobs:
           echo "✅ Stage 2 Complete!"
           echo ""
           echo "🎉 Release Published!"
+          echo "  - Version: v${{ github.event.inputs.version }}"
           echo "  - Tag: v${{ github.event.inputs.version }}"
           echo "  - GitHub Release: https://github.com/JasdeepN/ai-skeleton-extension/releases/tag/v${{ github.event.inputs.version }}"
           echo "  - Marketplace: https://marketplace.visualstudio.com/items?itemName=JasdeepN.ai-skeleton-extension"
