@@ -20,20 +20,27 @@ export async function activate(context: vscode.ExtensionContext) {
   const memoryService = getMemoryService();
   await memoryService.detectMemoryBank();
 
-  // Show unified setup dialog if components are missing
-  // This replaces the old AI-Memory-only prompt with a comprehensive setup
+  // Show unified setup dialog if components are missing (only on first time)
+  // If user dismissed before, don't show again - they can use Command Palette
   await showSetupDialog(context);
 
-  // Check for updates to installed components
+  // Check for updates to installed components (only if user hasn't dismissed update prompts)
+  const updateDismissedVersion = context.workspaceState.get<string>('aiSkeleton.updateDismissedVersion', '');
+  const currentVersion = vscode.extensions.getExtension('jasdeepn.ai-skeleton-extension')?.packageJSON?.version || '0.0.0';
+  
   const hasUpdates = await checkForUpdates(context);
-  if (hasUpdates) {
+  if (hasUpdates && updateDismissedVersion !== currentVersion) {
     const action = await vscode.window.showInformationMessage(
-      'AI Skeleton extension updated. Update installed components?',
-      'Update (Preserve Customizations)',
-      'Skip'
+      '🔄 AI Skeleton has new component definitions. Merge updates while preserving your customizations?',
+      { modal: false },
+      'Merge Updates',
+      'Later'
     );
-    if (action === 'Update (Preserve Customizations)') {
+    if (action === 'Merge Updates') {
       await reinstallAll(context);
+    } else {
+      // User chose "Later" or dismissed - remember for this version
+      await context.workspaceState.update('aiSkeleton.updateDismissedVersion', currentVersion);
     }
   }
 

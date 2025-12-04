@@ -1,5 +1,23 @@
 # Changelog
 
+## [Unreleased] - 0.1.22
+
+### Changed
+- **Setup Dialog UX Improvements**:
+  - Modal dialog centered in window for better visibility
+  - Friendly welcome message with emoji: "Welcome to AI Skeleton! 🚀"
+  - "Later" option remembers choice - won't nag on subsequent startups
+  - MCP is optional - missing MCP alone won't trigger setup dialog
+- **Update Notification**:
+  - Non-modal notification for extension updates with new definitions
+  - "Merge Updates" preserves USER sections while updating SYSTEM sections
+  - Dismissal remembered per-version - won't nag for same version
+
+### Technical
+- Added `aiSkeleton.setupDismissed` workspace state for first-time setup tracking
+- Added `aiSkeleton.updateDismissedVersion` workspace state for update prompt tracking
+- Setup dialog only triggers when recommended components are missing (not optional ones)
+
 ## 0.1.21 - 2025-12-04
 
 ### Added

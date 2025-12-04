@@ -177,55 +177,73 @@ async function checkFileMissing(uri: vscode.Uri): Promise<boolean> {
 }
 
 /**
- * Show unified setup dialog
+ * Show unified setup dialog - ONLY on first time or if user hasn't dismissed
  */
 export async function showSetupDialog(context: vscode.ExtensionContext): Promise<void> {
   const components = await detectMissingComponents(context);
   
-  if (components.length === 0) {
-    // Everything is installed
+  // Filter to only recommended components (MCP is optional, shouldn't trigger dialog)
+  const recommended = components.filter(c => c.picked);
+  
+  if (recommended.length === 0) {
+    // No required components missing - don't show dialog
     return;
   }
   
-  // Check if user disabled setup prompts
-  const config = vscode.workspace.getConfiguration('aiSkeleton');
-  const showSetup = config.get<boolean>('setup.showPrompt', true);
-  if (!showSetup) return;
-  
-  // Count how many are recommended (picked=true)
-  const recommended = components.filter(c => c.picked);
-  const optional = components.filter(c => !c.picked);
-  
-  // Build message
-  let message = `AI Skeleton Setup: ${recommended.length} recommended component${recommended.length !== 1 ? 's' : ''} available`;
-  if (optional.length > 0) {
-    message += ` (+${optional.length} optional)`;
+  // Check if user already dismissed the setup for this workspace
+  const dismissedSetup = context.workspaceState.get<boolean>('aiSkeleton.setupDismissed', false);
+  if (dismissedSetup) {
+    // User previously chose "Later" - don't bother them again
+    // They can use Command Palette or Activity Bar to install
+    return;
   }
   
+  // Get optional components (MCP)
+  const optional = components.filter(c => !c.picked);
+  
+  // Build friendly component summary
+  const componentNames = recommended.map(c => c.label.replace(/\$\([^)]+\)\s*/, '')).join(', ');
+  
+  // Use MODAL information dialog - centered, friendly blue styling
   const choice = await vscode.window.showInformationMessage(
-    message,
-    { modal: false },
+    `Welcome to AI Skeleton! 🚀`,
+    { 
+      modal: true, 
+      detail: `This workspace needs ${recommended.length} component${recommended.length !== 1 ? 's' : ''} for full AI agent functionality:\n\n` +
+              `${componentNames}${optional.length > 0 ? `\n\n(+${optional.length} optional: MCP Configuration)` : ''}\n\n` +
+              `• AI-Memory: Persistent context across sessions\n` +
+              `• Prompts: Think → Plan → Execute workflow\n` +
+              `• Agents: Deep-Think, MCP-Research, Prompt modes\n` +
+              `• GUARDRAILS: Safe AI operation rules\n\n` +
+              `Install now for the best experience!`
+    },
     'Install Recommended',
     'Customize...',
-    'Skip',
-    "Don't Ask Again"
+    'Later'
   );
   
   if (choice === 'Install Recommended') {
     await installComponents(context, recommended);
     vscode.window.showInformationMessage(
-      `✓ AI Skeleton setup complete! Installed ${recommended.length} component${recommended.length !== 1 ? 's' : ''}.`
+      `✅ AI Skeleton setup complete! Installed ${recommended.length} component${recommended.length !== 1 ? 's' : ''}.`
     );
   } else if (choice === 'Customize...') {
     const selected = await showComponentPicker(components);
     if (selected && selected.length > 0) {
       await installComponents(context, selected);
       vscode.window.showInformationMessage(
-        `✓ AI Skeleton setup complete! Installed ${selected.length} component${selected.length !== 1 ? 's' : ''}.`
+        `✅ AI Skeleton setup complete! Installed ${selected.length} component${selected.length !== 1 ? 's' : ''}.`
       );
     }
-  } else if (choice === "Don't Ask Again") {
-    await config.update('setup.showPrompt', false, vscode.ConfigurationTarget.Global);
+  } else {
+    // User clicked "Later" or closed the dialog - remember this choice
+    await context.workspaceState.update('aiSkeleton.setupDismissed', true);
+    if (choice === 'Later') {
+      vscode.window.showInformationMessage(
+        '📋 Setup skipped. Install later via Command Palette: "AI Skeleton: Initialize AI-Memory", "AI Skeleton: Install Prompts/Agents"',
+        'OK'
+      );
+    }
   }
 }
 
