@@ -20,6 +20,7 @@ on:
 
 permissions:
   contents: write
+  actions: read
 
 jobs:
   stage2-publish:
@@ -44,16 +45,91 @@ jobs:
           fi
 
       - name: Download VSIX artifact from Stage 1
-        uses: actions/download-artifact@v4
+        uses: dawidd6/action-download-artifact@v6
         with:
+          workflow: build-release.yml
+          workflow_conclusion: success
           name: ai-skeleton-vsix-${{ github.event.inputs.version }}
           path: ./vsix-download
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          search_artifacts: true
+          if_no_artifact_found: warn
+        continue-on-error: true
+        id: download_attempt
+
+      - name: Fallback - Download artifact via API
+        if: steps.download_attempt.outcome == 'failure'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const { execSync } = require('child_process');
+            const artifactName = `ai-skeleton-vsix-${{ github.event.inputs.version }}`;
+            
+            console.log(`🔍 Searching for artifact: ${artifactName}`);
+            
+            // List workflow runs for Stage 1
+            const runs = await github.rest.actions.listWorkflowRuns({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: 'build-release.yml',
+              status: 'success',
+              per_page: 20
+            });
+            
+            console.log(`Found ${runs.data.workflow_runs.length} successful Stage 1 runs`);
+            
+            // Find the run with matching artifact
+            for (const run of runs.data.workflow_runs) {
+              console.log(`Checking run ${run.id} from ${run.created_at}...`);
+              
+              const artifacts = await github.rest.actions.listWorkflowRunArtifacts({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                run_id: run.id
+              });
+              
+              console.log(`  - Found ${artifacts.data.artifacts.length} artifacts: ${artifacts.data.artifacts.map(a => a.name).join(', ')}`);
+              
+              const artifact = artifacts.data.artifacts.find(a => a.name === artifactName);
+              if (artifact) {
+                console.log(`✅ Found matching artifact in run ${run.id}, downloading...`);
+                
+                // Get download URL (returns redirect)
+                const download = await github.rest.actions.downloadArtifact({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  artifact_id: artifact.id,
+                  archive_format: 'zip'
+                });
+                
+                fs.mkdirSync('./vsix-download', { recursive: true });
+                
+                // download.data is ArrayBuffer, need to handle it properly
+                const buffer = Buffer.from(download.data);
+                fs.writeFileSync('./vsix-download/artifact.zip', buffer);
+                
+                console.log(`Downloaded ${buffer.length} bytes`);
+                
+                // Unzip
+                execSync('cd vsix-download && unzip -o artifact.zip && rm artifact.zip', { stdio: 'inherit' });
+                
+                // List extracted files
+                const files = fs.readdirSync('./vsix-download');
+                console.log(`Extracted files: ${files.join(', ')}`);
+                
+                console.log('✅ Artifact downloaded and extracted');
+                return;
+              }
+            }
+            
+            core.setFailed(`❌ Artifact ${artifactName} not found in recent Stage 1 runs. Available artifacts listed above.`);
 
       - name: Locate VSIX artifact
         id: find_vsix
         shell: bash
         run: |
-          VSIX=$(ls -1 vsix-download/*.vsix | head -n 1 || true)
+          VSIX=$(ls -1 vsix-download/*.vsix 2>/dev/null | head -n 1 || true)
           if [ -z "$VSIX" ]; then
             echo "❌ No VSIX file found from Stage 1 artifact"
             echo "Expected artifact name: ai-skeleton-vsix-${{ github.event.inputs.version }}"
