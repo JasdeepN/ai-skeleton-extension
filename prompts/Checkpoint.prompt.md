@@ -37,31 +37,31 @@ Run this checkpoint at the end of a coding session or when significant work has 
 Update each memory file based on recent work:
 
 #### activeContext.md
-- Update **Current Goals** using `#MemoryManagement updateContext`
+- Update **Current Goals** using `aiSkeleton_updateContext`
 - Update **Current Blockers** with any unresolved issues
 - Remove completed goals
 - Add new goals discovered during this session
 
 #### progress.md
-- Move completed items using `#MemoryManagement updateProgress`
+- Move completed items using `aiSkeleton_updateProgress`
 - Update "Doing" with current in-progress work
 - Update "Next" with planned upcoming tasks
 - Keep entries concise and timestamped
 
 #### decisionLog.md
-- Add decisions using `#MemoryManagement logDecision`
+- Add decisions using `aiSkeleton_logDecision`
 - Format: `| YYYY-MM-DD | Decision | Rationale |`
 
 #### systemPatterns.md
-- Document new patterns using `#MemoryManagement updateSystemPatterns`
+- Document new patterns using `aiSkeleton_updatePatterns`
 - Update existing patterns if they evolved
 - Categories:
   - **Architectural Patterns**: High-level system design
   - **Design Patterns**: Code organization and structure
   - **Common Idioms**: Project-specific conventions
 
-#### productContext.md
-- Update using `#MemoryManagement updateProductContext` if core features changed
+#### projectBrief.md
+- Update using `aiSkeleton_updateProjectBrief` if core features changed
 - Add new libraries or technologies to Technical Stack
 - Update overview if project scope shifted
 
@@ -167,7 +167,7 @@ Before completing:
 To run this checkpoint:
 
 1. Say "Checkpoint" or "Run checkpoint" to the assistant
-2. The assistant will execute all steps above
+2. The assistant will execute all steps above using `aiSkeleton_*` tools
 3. Review the generated summary and commit message
 4. Manually commit using the provided message, or edit as needed
 
@@ -176,7 +176,7 @@ To run this checkpoint:
 The assistant should respond with:
 
 1. **Status**: `[MEMORY BANK: UPDATING]` at start
-2. **Updates**: Confirmation of each file updated
+2. **Updates**: Confirmation of each file updated via `aiSkeleton_*` tools
 3. **Summary**: Structured session summary
 4. **Commit Message**: Ready-to-use git commit message
 5. **Final Status**: `[MEMORY BANK: ACTIVE]`

@@ -44,7 +44,7 @@ Think (Research & Analysis) → Plan (Breakdown & Tasks) → Execute (Implementa
 
 **Memory Action:**
 ```
-#MemoryManagement updateContext "Researching: <problem statement>"
+aiSkeleton_updateContext "Researching: <problem statement>"
 ```
 
 ---
@@ -78,7 +78,10 @@ Think (Research & Analysis) → Plan (Breakdown & Tasks) → Execute (Implementa
 
 **Memory Action:**
 ```
-#MemoryManagement logDecision "Research findings: <key insights>" "Context: <research scope>"
+aiSkeleton_logDecision {
+  "decision": "Research findings: <key insights>",
+  "rationale": "Context: <research scope>"
+}
 ```
 
 ---
@@ -108,7 +111,10 @@ Think (Research & Analysis) → Plan (Breakdown & Tasks) → Execute (Implementa
 
 **Memory Action:**
 ```
-#MemoryManagement updateSystemPatterns "<Pattern Name>" "<Pattern Description with trade-offs>"
+aiSkeleton_updatePatterns {
+  "pattern": "<Pattern Name>",
+  "context": "<Pattern Description with trade-offs>"
+}
 ```
 
 ---
@@ -182,8 +188,8 @@ Create a structured output that Plan.prompt.md can consume:
 
 **Memory Actions:**
 ```
-#MemoryManagement updateProjectBrief "<Research brief content>"
-#MemoryManagement updateProgress "Next: Plan implementation of <feature>"
+aiSkeleton_updateProjectBrief "<Research brief content>"
+aiSkeleton_updateProgress "Next: Plan implementation of <feature>"
 ```
 
 ---
@@ -200,8 +206,8 @@ Create a structured output that Plan.prompt.md can consume:
 
 2. **Update Memory Management**
    ```
-   #MemoryManagement updateContext "Ready to plan: <feature name>"
-   #MemoryManagement updateProgress "Done: Research for <feature>; Next: Create implementation plan"
+   aiSkeleton_updateContext "Ready to plan: <feature name>"
+   aiSkeleton_updateProgress "Done: Research for <feature>; Next: Create implementation plan"
    ```
 
 3. **Transition to Plan.prompt.md**
@@ -309,7 +315,7 @@ Create a structured output that Plan.prompt.md can consume:
 
 ### 2. Research
 ```
-#MemoryManagement query "Image optimization patterns"
+aiSkeleton_updateContext "Query image optimization patterns"
 #WebResearch "Next.js image optimization with Cloudflare R2"
 ```
 
@@ -333,7 +339,10 @@ Create a structured output that Plan.prompt.md can consume:
 
 ### 4. Research Brief
 ```
-#MemoryManagement updateSystemPatterns "R2 Image Gallery"
+aiSkeleton_updatePatterns {
+  "pattern": "R2 Image Gallery",
+  "context": "Loader implementation, Fallback strategy, Environment configuration, Testing approach"
+}
 ```
 
 **Pattern documented with:**
@@ -344,7 +353,7 @@ Create a structured output that Plan.prompt.md can consume:
 
 ### 5. Handoff to Planning
 ```
-#MemoryManagement updateProgress "Done: R2 gallery research; Next: Plan implementation"
+aiSkeleton_updateProgress "Done: R2 gallery research; Next: Plan implementation"
 ```
 
 **Plan.prompt.md receives:**
@@ -368,7 +377,7 @@ Create a structured output that Plan.prompt.md can consume:
    - Avoid re-researching solved problems
 
 3. **Document as You Go**
-   - Update #MemoryManagement throughout research
+   - Update `aiSkeleton_*` tools throughout research
    - Don't wait until the end
    - Capture insights when fresh
 
@@ -380,7 +389,7 @@ Create a structured output that Plan.prompt.md can consume:
 5. **Integrate Tools Wisely**
    - Use #DeepThink for structured analysis
    - Use #WebResearch for external validation
-   - Use #MemoryManagement for persistence
+   - Use `aiSkeleton_*` tools for memory persistence
 
 ---
 
@@ -394,7 +403,7 @@ Before moving to Plan.prompt.md:
 - [ ] Technical details are documented
 - [ ] Risks are identified with mitigations
 - [ ] Success criteria are defined
-- [ ] Research is saved to #MemoryManagement
+- [ ] Research is saved via `aiSkeleton_*` tools
 - [ ] activeContext.md reflects current state
 - [ ] Relevant patterns added to systemPatterns.md
 - [ ] Decision logged in decisionLog.md

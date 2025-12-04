@@ -14,10 +14,10 @@
 This prompt executes tasks from Think → Plan workflow. You are autonomous during execution. Do not ask for permission or confirmation between steps. Complete every #todo, verify all tests pass, **ensure build succeeds and app functions**, and validate success criteria before finishing.
 
 Toolsets Mapping (from .github/toolsets/Tools.jsonc):
-- #DeepThink => Deep Thinking
-- #MemoryManagement => Memory Management
-- #WebResearch => Web Research
-- #ProjectManagement => Project Management
+- Deep Thinking => mcp_sequential-th_sequentialthinking
+- Memory Management => aiSkeleton_* tools (updateContext, updateProgress, logDecision, updatePatterns, updateProjectBrief, showMemory, markDeprecated)
+- Web Research => vscode-websearchforcopilot_webSearch
+- Project Management => manage_todo_list
 
 ---
 
@@ -27,8 +27,8 @@ Before starting execution, systematically verify:
 
 1. **Load Complete Context**
    ```
-   #MemoryManagement showMemory
-   #MemoryManagement updateProgress (load current progress)
+   aiSkeleton_showMemory
+   aiSkeleton_updateProgress (load current progress)
    ```
    - Load the full plan from Think/Plan phases
    - Retrieve all #todos and their status
@@ -44,7 +44,7 @@ Before starting execution, systematically verify:
 
 3. **Set Execution Context**
    ```
-   #MemoryManagement updateContext "EXECUTING: <plan name> - Starting systematic implementation"
+   aiSkeleton_updateContext "EXECUTING: <plan name> - Starting systematic implementation"
    ```
 
 **If plan is incomplete:** Use `think` tool to fill gaps, update memory tools, then proceed.
@@ -69,7 +69,7 @@ Before starting execution, systematically verify:
 
 3. **Create Execution Checklist**
    ```
-   #MemoryManagement updateProgress "Execution checklist created: <list all todos>"
+   aiSkeleton_updateProgress "Execution checklist created: <list all todos>"
    ```
 
 ### Phase 2: Sequential Step Execution
@@ -96,7 +96,7 @@ END WHILE
 
 1. **Pre-Action**
    ```
-   #MemoryManagement updateProgress "Starting: <specific action>"
+   aiSkeleton_updateProgress "Starting: <specific action>"
    ```
    - State exactly what you're about to do
    - Verify prerequisites met
@@ -115,8 +115,8 @@ END WHILE
 
 4. **Update Memory (MANDATORY)**
    ```
-   #MemoryManagement updateProgress "Completed: <action> - Status: <result>"
-   #MemoryManagement logDecision "<what was done>" "Context: <why this way>"
+   aiSkeleton_updateProgress "Completed: <action> - Status: <result>"
+   aiSkeleton_logDecision "<what was done>" "Context: <why this way>"
    ```
    - What changed
    - Why it changed
@@ -143,7 +143,7 @@ END WHILE
 1. **After Each Component**
    - Run unit tests for modified code
    - Verify no regressions
-   - Document test results in #MemoryManagement
+   - Document test results via `aiSkeleton_logDecision`
    - **Run build to catch compilation errors early**
 
 2. **After Each Major Step**
@@ -163,11 +163,11 @@ END WHILE
 ```
 IF (test fails OR build fails OR smoke test fails) THEN:
   1. Analyze failure cause
-  2. #MemoryManagement logDecision "Failure: <details>" "Fix: <approach>"
+  2. aiSkeleton_logDecision "Failure: <details>" "Fix: <approach>"
   3. Implement fix
   4. Re-run tests AND rebuild
   5. Verify app functions correctly
-  6. Update memory with resolution
+  6. Update memory with resolution via aiSkeleton_updateProgress
   7. Continue execution
   LOOP UNTIL (all tests pass AND build succeeds AND app functions)
 END IF
@@ -187,29 +187,29 @@ END IF
 
 1. **Progress Tracking**
    ```
-   #MemoryManagement updateProgress "Completed: <action/todo> | Status: <done/in-progress/blocked> | Next: <immediate next action>"
+   aiSkeleton_updateProgress "Completed: <action/todo> | Status: <done/in-progress/blocked> | Next: <immediate next action>"
    ```
 
 2. **Decision Logging**
    ```
-   #MemoryManagement logDecision "Decision: <what was decided>" "Context: <why/how> | Impact: <what this affects>"
+   aiSkeleton_logDecision "Decision: <what was decided>" "Context: <why/how> | Impact: <what this affects>"
    ```
 
 3. **Active Context**
    ```
-   #MemoryManagement updateContext "Current: <what you're doing now> | Last Completed: <previous action> | Next Up: <next 2-3 actions> | Blockers: <issues or none>"
+   aiSkeleton_updateContext "Current: <what you're doing now> | Last Completed: <previous action> | Next Up: <next 2-3 actions> | Blockers: <issues or none>"
    ```
 
 4. **System Patterns (when applicable)**
    ```
-   #MemoryManagement updateSystemPatterns "<Pattern>" "Description: <reusable pattern> | Use Case: <when to apply> | Example: <code/approach>"
+   aiSkeleton_updatePatterns "Pattern: <name>" "Description: <reusable pattern> | Use Case: <when to apply> | Example: <code/approach>"
    ```
 
 ### Memory Update Frequency
 - Minimum: After every single action
 - Recommended: Before starting, after completion, on decisions, on issues, for patterns
 
-**Golden Rule:** If you haven't updated #MemoryManagement in the last action, you're doing it wrong.
+**Golden Rule:** If you haven't updated `aiSkeleton_*` tools in the last action, you're doing it wrong.
 
 ---
 
@@ -219,20 +219,20 @@ END IF
 
 1. **Document Blocker**
    ```
-   #MemoryManagement updateProgress "BLOCKER: <issue> - Analyzing solutions"
+   aiSkeleton_updateProgress "BLOCKER: <issue> - Analyzing solutions"
    ```
 2. **Analyze with Deep Thinking**
    ```
-   #DeepThink analyze <blocker description>
+   mcp_sequential-th_sequentialthinking analyze <blocker description>
    ```
 3. **Research if Needed**
    ```
-   #WebResearch <specific technical issue>
+   vscode-websearchforcopilot_webSearch <specific technical issue>
    ```
 4. **Implement Solution**
 5. **Update Memory**
    ```
-   #MemoryManagement logDecision "Resolved blocker: <issue>" "Solution: <approach>"
+   aiSkeleton_logDecision "Resolved blocker: <issue>" "Solution: <approach>"
    ```
 6. **Continue Execution**
 
@@ -310,15 +310,15 @@ Before marking execution complete, verify ALL criteria:
 
 1. **Final Progress Update**
    ```
-   #MemoryManagement updateProgress "✅ EXECUTION COMPLETE: <plan name> | Todos: <count> | Tests: <summary> | Deliverables: <list>"
+   aiSkeleton_updateProgress "✅ EXECUTION COMPLETE: <plan name> | Todos: <count> | Tests: <summary> | Deliverables: <list>"
    ```
 2. **Completion Decision**
    ```
-   #MemoryManagement logDecision "Execution Complete: <plan>" "Success criteria met; ready for <next phase>"
+   aiSkeleton_logDecision "Execution Complete: <plan>" "Success criteria met; ready for <next phase>"
    ```
 3. **Active Context Update**
    ```
-   #MemoryManagement updateContext "Status: COMPLETE | Last: <plan> | Next: <follow-up>"
+   aiSkeleton_updateContext "Status: COMPLETE | Last: <plan> | Next: <follow-up>"
    ```
 4. **Pattern Archival (If new)**
 5. **Generate Report**
