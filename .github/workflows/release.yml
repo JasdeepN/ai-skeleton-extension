@@ -26,6 +26,9 @@ jobs:
       - name: Install dependencies
         run: npm install
 
+      - name: Verify embeddings (GATE - must pass to release)
+        run: npm run test:verify-embeddings
+
       - name: Build (embed assets + compile)
         run: npm run build
 
