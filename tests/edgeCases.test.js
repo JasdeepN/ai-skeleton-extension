@@ -11,7 +11,7 @@ const {
   BatchProcessor,
   DataSanitizer,
   DEFAULT_VALIDATION_RULES
-} = require('../dist/edgeCaseHandler');
+} = require('../dist/src/edgeCaseHandler');
 
 describe('Edge Case Handling', () => {
   // =========================================================================
