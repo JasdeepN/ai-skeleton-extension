@@ -18,12 +18,16 @@ Run this checkpoint at the end of a coding session or when significant work has 
 
 ### Step 1: Review Current State
 
-1. **Read all memory files** in this order:
-   - `AI-Memory/productContext.md` - Understand the project scope
-   - `AI-Memory/activeContext.md` - Current goals and blockers
-   - `AI-Memory/systemPatterns.md` - Architectural patterns
-   - `AI-Memory/decisionLog.md` - Past decisions
-   - `AI-Memory/progress.md` - Recent work
+1. **Query memory database**:
+   ```
+   aiSkeleton_showMemory
+   ```
+   This returns all memory entries organized by type:
+   - Project brief - Understand the project scope
+   - Active context - Current goals and blockers
+   - System patterns - Architectural patterns
+   - Decision log - Past decisions
+   - Progress - Recent work (done/doing/next)
 
 2. **Gather session context**:
    - Review recent git changes: `git status` and `git diff`
@@ -32,36 +36,61 @@ Run this checkpoint at the end of a coding session or when significant work has 
      - Configuration files (`.github/`, `.vscode/`, root configs)
    - Note any test runs, builds, or deployments attempted
 
-### Step 2: Update Memory Files
+### Step 2: Update Memory Database
 
-Update each memory file based on recent work:
+Update the database using `aiSkeleton_*` tools. All updates persist to both SQLite and markdown files automatically.
 
-#### activeContext.md
-- Update **Current Goals** using `aiSkeleton_updateContext`
-- Update **Current Blockers** with any unresolved issues
+#### Active Context
+Update current goals and blockers:
+```
+aiSkeleton_updateContext({
+  "context": "[Current focus, blockers, and recent changes]"
+})
+```
 - Remove completed goals
 - Add new goals discovered during this session
 
-#### progress.md
-- Move completed items using `aiSkeleton_updateProgress`
-- Update "Doing" with current in-progress work
-- Update "Next" with planned upcoming tasks
-- Keep entries concise and timestamped
+#### Progress
+Track task completion:
+```
+aiSkeleton_updateProgress({
+  "item": "[Task description]",
+  "status": "done" | "doing" | "next"
+})
+```
+- Move completed items to "done"
+- Update "doing" with current in-progress work
+- Update "next" with planned upcoming tasks
 
-#### decisionLog.md
-- Add decisions using `aiSkeleton_logDecision`
-- Format: `| YYYY-MM-DD | Decision | Rationale |`
+#### Decision Log
+Document decisions made:
+```
+aiSkeleton_logDecision({
+  "decision": "[What was decided]",
+  "rationale": "[Why this decision was made]"
+})
+```
 
-#### systemPatterns.md
-- Document new patterns using `aiSkeleton_updatePatterns`
-- Update existing patterns if they evolved
-- Categories:
-  - **Architectural Patterns**: High-level system design
-  - **Design Patterns**: Code organization and structure
-  - **Common Idioms**: Project-specific conventions
+#### System Patterns
+Document new or updated patterns:
+```
+aiSkeleton_updatePatterns({
+  "pattern": "[Pattern name]",
+  "description": "[Pattern description and usage]"
+})
+```
+Categories:
+- **Architectural Patterns**: High-level system design
+- **Design Patterns**: Code organization and structure
+- **Common Idioms**: Project-specific conventions
 
-#### projectBrief.md
-- Update using `aiSkeleton_updateProjectBrief` if core features changed
+#### Project Brief
+Update if core features changed:
+```
+aiSkeleton_updateProjectBrief({
+  "content": "[Updated project information]"
+})
+```
 - Add new libraries or technologies to Technical Stack
 - Update overview if project scope shifted
 

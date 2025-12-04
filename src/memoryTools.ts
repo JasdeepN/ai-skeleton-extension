@@ -58,21 +58,8 @@ export class ShowMemoryTool implements vscode.LanguageModelTool<ShowMemoryParams
     _token: vscode.CancellationToken
   ): Promise<vscode.LanguageModelToolResult> {
     const service = getMemoryService();
-    const params = options.input;
-
-    let content: string;
-    if (params.file) {
-      // Read specific file
-      if (!VALID_FILES.includes(params.file as MemoryFileName)) {
-        content = `Invalid file: ${params.file}. Valid files: ${VALID_FILES.join(', ')}`;
-      } else {
-        const fileContent = await service.readFile(params.file as MemoryFileName);
-        content = fileContent || `File not found: ${params.file}`;
-      }
-    } else {
-      // Show full memory summary
-      content = await service.showMemory();
-    }
+    // Note: file parameter is deprecated, we now use showMemory() which includes all data
+    const content = await service.showMemory();
 
     return new vscode.LanguageModelToolResult([
       new vscode.LanguageModelTextPart(content)

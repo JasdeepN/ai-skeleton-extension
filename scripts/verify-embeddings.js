@@ -236,60 +236,6 @@ function verifyProtectedFiles() {
   return issues;
 }
 
-function verifyMemoryTemplates() {
-  console.log(`\n${colors.blue}=== Verifying Memory Templates ===${colors.reset}`);
-
-  const memoryDir = path.join(__dirname, '..', 'embeds', 'AI-Memory');
-  const storePath = path.join(__dirname, '..', 'src', 'memoryTemplateStore.ts');
-
-  if (!fs.existsSync(storePath)) {
-    console.log(`${colors.red}✗ memoryTemplateStore.ts not found${colors.reset}`);
-    return 1;
-  }
-
-  const storeContent = fs.readFileSync(storePath, 'utf8');
-  const sourceFiles = fs.readdirSync(memoryDir).filter(f => f.endsWith('.md'));
-  let issues = 0;
-
-  // Extract base64 values from store
-  const embeddedPattern = /(\w+):\s*'([A-Za-z0-9+/=]+)'/g;
-  const embedded = {};
-  let match;
-  while ((match = embeddedPattern.exec(storeContent)) !== null) {
-    const [, key, b64] = match;
-    embedded[key] = decodeBase64(b64);
-  }
-
-  for (const file of sourceFiles) {
-    const key = file.replace('.md', '');
-    const filepath = path.join(memoryDir, file);
-    const sourceContent = readSourceFile(filepath);
-
-    if (!sourceContent) {
-      console.log(`${colors.red}✗ ${file}${colors.reset} - Source file not found`);
-      issues++;
-      continue;
-    }
-
-    if (!embedded[key]) {
-      console.log(`${colors.red}✗ ${file}${colors.reset} - Not found in memoryTemplateStore.ts`);
-      issues++;
-      continue;
-    }
-
-    const sourceHash = hash(sourceContent);
-    const embHash = hash(embedded[key]);
-
-    if (sourceHash === embHash) {
-      console.log(`${colors.green}✓ ${file}${colors.reset} - OK`);
-    } else {
-      console.log(`${colors.red}✗ ${file}${colors.reset} - Content mismatch`);
-      issues++;
-    }
-  }
-
-  return issues;
-}
 
 function main() {
   console.log(`${colors.blue}Verifying Embedded Assets${colors.reset}`);
@@ -299,7 +245,6 @@ function main() {
   totalIssues += verifyPrompts();
   totalIssues += verifyAgents();
   totalIssues += verifyProtectedFiles();
-  totalIssues += verifyMemoryTemplates();
 
   console.log(`\n${colors.blue}=${'='.repeat(40)}${colors.reset}`);
 

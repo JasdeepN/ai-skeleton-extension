@@ -4,7 +4,6 @@
 import * as vscode from 'vscode';
 import { getPrompts } from './promptStore';
 import { getAgents, getProtectedFilesEmbedded } from './agentStore';
-import { getAllMemoryTemplates } from './memoryTemplateStore';
 import { getMCPConfigString } from './mcpStore';
 import { getMemoryService } from './memoryService';
 
