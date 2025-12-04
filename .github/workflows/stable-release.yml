@@ -1,0 +1,162 @@
+name: Stable Release (Promote to Marketplace)
+
+# Manual workflow to promote a pre-release to stable and publish to Marketplace
+# Usage:
+#   1. Run 'Build on PR Merge' workflow first (creates pre-release)
+#   2. Test the pre-release manually
+#   3. Run this workflow to promote to stable
+#   4. Enter the version to promote (or leave blank for latest pre-release)
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to promote (e.g., 0.2.0). Leave blank to promote latest pre-release.'
+        required: false
+        type: string
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  promote-to-stable:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Determine version to promote
+        id: version
+        uses: actions/github-script@v7
+        with:
+          script: |
+            let targetVersion = '${{ github.event.inputs.version }}';
+            
+            if (!targetVersion) {
+              // Find latest pre-release
+              console.log('No version specified, finding latest pre-release...');
+              
+              const releases = await github.rest.repos.listReleases({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                per_page: 20
+              });
+              
+              const prerelease = releases.data.find(r => r.prerelease);
+              
+              if (!prerelease) {
+                core.setFailed('No pre-release found. Run "Build on PR Merge" workflow first.');
+                return;
+              }
+              
+              targetVersion = prerelease.tag_name.replace(/^v/, '');
+              console.log(`Found latest pre-release: v${targetVersion}`);
+            }
+            
+            console.log(`Target version: ${targetVersion}`);
+            core.setOutput('version', targetVersion);
+            core.setOutput('tag', `v${targetVersion}`);
+
+      - name: Download VSIX from pre-release
+        id: download
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const targetTag = '${{ steps.version.outputs.tag }}';
+            
+            console.log(`Looking for release: ${targetTag}`);
+            
+            // Find the release
+            const releases = await github.rest.repos.listReleases({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              per_page: 50
+            });
+            
+            const release = releases.data.find(r => r.tag_name === targetTag);
+            
+            if (!release) {
+              core.setFailed(`Release ${targetTag} not found`);
+              return;
+            }
+            
+            console.log(`Found release: ${release.name} (prerelease: ${release.prerelease})`);
+            
+            // Find VSIX asset
+            const vsixAsset = release.assets.find(a => a.name.endsWith('.vsix'));
+            
+            if (!vsixAsset) {
+              core.setFailed(`No VSIX asset found in release ${targetTag}`);
+              return;
+            }
+            
+            console.log(`Found VSIX: ${vsixAsset.name}`);
+            
+            // Download the asset
+            const download = await github.rest.repos.getReleaseAsset({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              asset_id: vsixAsset.id,
+              headers: {
+                Accept: 'application/octet-stream'
+              }
+            });
+            
+            fs.mkdirSync('./vsix-download', { recursive: true });
+            const vsixPath = `./vsix-download/${vsixAsset.name}`;
+            fs.writeFileSync(vsixPath, Buffer.from(download.data));
+            
+            console.log(`Downloaded to: ${vsixPath}`);
+            core.setOutput('vsix_path', vsixPath);
+            core.setOutput('vsix_name', vsixAsset.name);
+            core.setOutput('release_id', release.id);
+
+      - name: Promote to Stable Release
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const releaseId = parseInt('${{ steps.download.outputs.release_id }}');
+            const version = '${{ steps.version.outputs.version }}';
+            
+            console.log(`Promoting release ${releaseId} to stable...`);
+            
+            await github.rest.repos.updateRelease({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              release_id: releaseId,
+              prerelease: false,
+              make_latest: 'true',
+              name: `v${version}`,
+              body: `## Stable Release v${version}\n\n✅ This release has been promoted from pre-release and is considered stable.\n\nPublished to VS Code Marketplace.`
+            });
+            
+            console.log('✅ Release promoted to stable');
+
+      - name: Install Node and vsce
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Publish to VS Code Marketplace
+        run: |
+          npm install -g @vscode/vsce
+          vsce publish -p ${{ secrets.VSCE_PAT }} --packagePath ${{ steps.download.outputs.vsix_path }}
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+
+      - name: Summary
+        run: |
+          echo "✅ Stable Release Complete!"
+          echo ""
+          echo "🎉 v${{ steps.version.outputs.version }} is now STABLE"
+          echo ""
+          echo "📦 Published to:"
+          echo "  - GitHub Release: https://github.com/${{ github.repository }}/releases/tag/${{ steps.version.outputs.tag }}"
+          echo "  - VS Code Marketplace: https://marketplace.visualstudio.com/items?itemName=JasdeepN.ai-skeleton-extension"
+          echo ""
+          echo "Users can now install via:"
+          echo "  code --install-extension JasdeepN.ai-skeleton-extension"
