@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.1.17 - 2025-12-03
+
+### Fixed
+- **Embedded Assets**: Re-embedded all prompts and agents with latest updates
+  - Checkpoint prompt now includes Step 7 Cleanup & Archive workflow
+  - Startup prompt includes comprehensive 4-phase Initial Setup workflow
+  - All prompts updated to use actual `aiSkeleton_*` tool names
+  - All prompts are now 100% generic (no project-specific references)
+
+### Changed
+- Build process now properly embeds updated prompts before compilation
+- Extension now ships with all latest prompt improvements
+
+## 0.1.16 - 2025-12-03
+
+### Changed
+- Updated CHANGELOG with comprehensive release history
+
 ## 0.1.15 - 2025-12-03
 
 ### Fixed
