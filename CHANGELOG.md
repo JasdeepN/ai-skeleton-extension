@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.1.20 - 2025-12-04
+
+### Fixed
+- Updated embedded agent and prompt assets
+
+### Technical
+- Re-embedded prompts and agents with latest updates
+- Verified all embeddings match source files
+
+
 ## 0.1.19 - 2025-12-04
 
 ### Fixed

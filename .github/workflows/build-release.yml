@@ -1,19 +1,22 @@
-name: Build and GitHub Release
+name: Build and Release - Stage 1 (Embed, Build, Verify)
+
+# Automatically triggered when code is merged to main
+# Runs: embed-all → compile → verify embeddings
+# Does NOT push or commit - outputs ready for publishing
 
 on:
   push:
-    tags:
-      - 'v*'
-  workflow_dispatch:
+    branches:
+      - main
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  build-and-release:
+  stage1-build:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
+      - name: Checkout main
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
@@ -26,38 +29,56 @@ jobs:
       - name: Install dependencies
         run: npm install
 
-      - name: Verify embeddings (GATE - must pass to release)
+      - name: Get version from package.json
+        id: version
+        shell: bash
+        run: |
+          VERSION=$(jq -r '.version' package.json)
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "✅ Version: $VERSION"
+
+      - name: Re-embed prompts and agents
+        run: npm run embed-all
+
+      - name: Build extension
+        run: npm run compile
+
+      - name: Verify embeddings (GATE - must pass)
         run: npm run test:verify-embeddings
 
-      - name: Build (embed assets + compile)
-        run: npm run build
-
-      - name: Package VSIX (no version bump)
+      - name: Package VSIX
         run: node scripts/package-vsix.js --noBump
 
       - name: Locate VSIX artifact
         id: find_vsix
         shell: bash
         run: |
-          set -e
           VSIX=$(ls -1 **/*.vsix | head -n 1 || true)
           echo "vsix_path=$VSIX" >> $GITHUB_OUTPUT
           if [ -z "$VSIX" ]; then
-            echo "No VSIX file found." >&2
+            echo "❌ No VSIX file found"
             exit 1
           fi
+          echo "✅ Found VSIX: $VSIX"
 
-      - name: Upload VSIX as build artifact
+      - name: Upload VSIX as artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ai-skeleton-vsix
+          name: ai-skeleton-vsix-${{ steps.version.outputs.version }}
           path: ${{ steps.find_vsix.outputs.vsix_path }}
+          retention-days: 30
 
-      - name: Create GitHub Release and attach VSIX
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v2
-        with:
-          files: ${{ steps.find_vsix.outputs.vsix_path }}
-          draft: false
-          make_latest: true
-          generate_release_notes: true
+      - name: Summary
+        run: |
+          echo "✅ Stage 1 Complete!"
+          echo ""
+          echo "📦 Built and verified v${{ steps.version.outputs.version }}"
+          echo "  - Re-embedded prompts and agents"
+          echo "  - Compiled TypeScript"
+          echo "  - Verified all embeddings"
+          echo "  - Packaged VSIX"
+          echo ""
+          echo "🚀 Next: Run Stage 2 (Publish) workflow to:"
+          echo "  - Create tag v${{ steps.version.outputs.version }}"
+          echo "  - Create GitHub Release"
+          echo "  - Publish to VS Code Marketplace"
