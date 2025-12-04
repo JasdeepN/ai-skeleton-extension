@@ -1,0 +1,54 @@
+#!/bin/bash
+
+# Pre-push hook: Enforce "pull before push" rule
+# Prevents pushing if local branch is behind remote
+
+# Get the name of the current branch
+current_branch=$(git rev-parse --abbrev-ref HEAD)
+
+# Skip check for new branches that don't exist on remote yet
+if ! git ls-remote --exit-code --heads origin "$current_branch" > /dev/null 2>&1; then
+    echo "✅ New branch '$current_branch' - no remote to compare"
+    exit 0
+fi
+
+# Fetch the latest changes from the remote (quietly)
+git fetch origin "$current_branch" --quiet
+
+# Compare local and remote branches
+local_commit=$(git rev-parse HEAD)
+remote_commit=$(git rev-parse origin/"$current_branch" 2>/dev/null)
+
+if [ -z "$remote_commit" ]; then
+    echo "✅ No remote branch to compare"
+    exit 0
+fi
+
+# Check if local is behind remote (remote has commits we don't have)
+behind_count=$(git rev-list --count HEAD..origin/"$current_branch" 2>/dev/null || echo "0")
+
+if [ "$behind_count" -gt 0 ]; then
+    echo ""
+    echo "❌ Error: Local branch '$current_branch' is $behind_count commit(s) behind remote."
+    echo ""
+    echo "   Please pull the latest changes before pushing:"
+    echo "   git pull origin $current_branch"
+    echo ""
+    exit 1
+fi
+
+# Check if we're diverged (both ahead and behind)
+ahead_count=$(git rev-list --count origin/"$current_branch"..HEAD 2>/dev/null || echo "0")
+
+if [ "$behind_count" -gt 0 ] && [ "$ahead_count" -gt 0 ]; then
+    echo ""
+    echo "⚠️  Warning: Branch '$current_branch' has diverged from remote."
+    echo "   Local is $ahead_count ahead, $behind_count behind."
+    echo ""
+    echo "   Please pull and resolve conflicts before pushing:"
+    echo "   git pull origin $current_branch"
+    echo ""
+    exit 1
+fi
+
+exit 0
