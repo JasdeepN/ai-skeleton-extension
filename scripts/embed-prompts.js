@@ -12,7 +12,7 @@
 const fs = require('fs');
 const path = require('path');
 
-const PROMPTS_DIR = path.resolve(__dirname, '../prompts');
+const PROMPTS_DIR = path.resolve(__dirname, '../embeds/prompts');
 const OUTPUT_FILE = path.resolve(__dirname, '../src/promptStore.ts');
 
 /**
@@ -144,7 +144,7 @@ export async function getPrompts(source: 'auto'|'embedded'|'workspace'): Promise
 }
 
 // Main execution
-console.log('\\n🔧 Embedding prompts into promptStore.ts...\\n');
+console.log('\n🔧 Embedding prompts into promptStore.ts...\n');
 
 try {
   const prompts = readPromptFiles();
@@ -152,9 +152,9 @@ try {
   
   fs.writeFileSync(OUTPUT_FILE, tsCode, 'utf8');
   
-  console.log(`\\n✅ Successfully generated ${OUTPUT_FILE}`);
-  console.log(`   Embedded ${prompts.length} prompts\\n`);
+  console.log(`\n✅ Successfully generated ${OUTPUT_FILE}`);
+  console.log(`   Embedded ${prompts.length} prompts\n`);
 } catch (error) {
-  console.error('\\n❌ Error embedding prompts:', error.message);
+  console.error('\n❌ Error embedding prompts:', error.message);
   process.exit(1);
 }

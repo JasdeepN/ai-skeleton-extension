@@ -1,51 +1,88 @@
-name: Publish to Marketplace
+name: Release - Stage 2 (Tag, Release, Publish to Marketplace)
+
+# Manual trigger AFTER Stage 1 completes
+# Downloads VSIX from Stage 1 build, creates tag, GitHub Release, and publishes to marketplace
+# Usage:
+#   1. Ensure Stage 1 workflow has completed successfully on main
+#   2. Go to Actions tab → "Release - Stage 2" workflow
+#   3. Click "Run workflow"
+#   4. Enter the version (e.g., 0.1.20) - will create tag v0.1.20
+#   5. Workflow creates GitHub Release and publishes to marketplace
 
 on:
   workflow_dispatch:
     inputs:
-      tag:
-        description: 'Tag to publish (e.g., v0.1.18)'
+      version:
+        description: 'Version to publish (e.g., 0.1.20). Must match package.json version on main.'
         required: true
         type: string
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  publish:
+  stage2-publish:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout tag
+      - name: Checkout main
         uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.tag }}
           fetch-depth: 0
 
-      - name: Use Node.js
-        uses: actions/setup-node@v4
+      - name: Verify version matches package.json
+        shell: bash
+        run: |
+          VERSION="${{ github.event.inputs.version }}"
+          PACKAGE_VERSION=$(jq -r '.version' package.json)
+          
+          if [ "$VERSION" != "$PACKAGE_VERSION" ]; then
+            echo "❌ Error: Input version $VERSION does not match package.json version $PACKAGE_VERSION"
+            exit 1
+          fi
+          echo "✅ Version verified: $VERSION"
+
+      - name: Download VSIX from Stage 1
+        uses: actions/download-artifact@v4
         with:
-          node-version: '20'
-
-      - name: Install dependencies
-        run: npm install
-
-      - name: Build (embed assets + compile)
-        run: npm run build
-
-      - name: Package VSIX (no version bump)
-        run: node scripts/package-vsix.js --noBump
+          name: ai-skeleton-vsix-${{ github.event.inputs.version }}
+          path: ./vsix-download
 
       - name: Locate VSIX artifact
         id: find_vsix
         shell: bash
         run: |
-          set -e
-          VSIX=$(ls -1 **/*.vsix | head -n 1 || true)
-          echo "vsix_path=$VSIX" >> $GITHUB_OUTPUT
+          VSIX=$(ls -1 vsix-download/*.vsix | head -n 1 || true)
           if [ -z "$VSIX" ]; then
-            echo "No VSIX file found." >&2
+            echo "❌ No VSIX file found from Stage 1"
             exit 1
           fi
+          echo "vsix_path=$VSIX" >> $GITHUB_OUTPUT
+          echo "✅ Found VSIX: $VSIX"
+
+      - name: Create git tag
+        shell: bash
+        run: |
+          VERSION="v${{ github.event.inputs.version }}"
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          
+          git tag -f "$VERSION"
+          git push -f origin "$VERSION"
+          echo "✅ Tag created and pushed: $VERSION"
+
+      - name: Create GitHub Release with VSIX
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ github.event.inputs.version }}
+          files: ${{ steps.find_vsix.outputs.vsix_path }}
+          draft: false
+          make_latest: true
+          generate_release_notes: true
+
+      - name: Install Node and vsce
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
 
       - name: Publish to VS Code Marketplace
         run: |
@@ -56,5 +93,9 @@ jobs:
 
       - name: Summary
         run: |
-          echo "✅ Successfully published ${{ inputs.tag }} to VS Code Marketplace"
-          echo "🔗 View at: https://marketplace.visualstudio.com/items?itemName=JasdeepN.ai-skeleton-extension"
+          echo "✅ Stage 2 Complete!"
+          echo ""
+          echo "🎉 Release Published!"
+          echo "  - Tag: v${{ github.event.inputs.version }}"
+          echo "  - GitHub Release: https://github.com/JasdeepN/ai-skeleton-extension/releases/tag/v${{ github.event.inputs.version }}"
+          echo "  - Marketplace: https://marketplace.visualstudio.com/items?itemName=JasdeepN.ai-skeleton-extension"

@@ -2,25 +2,85 @@
 set -e
 
 # AI Skeleton Extension - Automated Release Script
-# Usage: ./scripts/release.sh [version]
-# Example: ./scripts/release.sh 0.1.17
+# Usage: ./scripts/release.sh [version] [--noBump]
+# Examples:
+#   ./scripts/release.sh              # Auto-bump patch (0.1.19 -> 0.1.20)
+#   ./scripts/release.sh 0.2.0        # Explicit version
+#   ./scripts/release.sh --noBump     # Release without bumping
 
-VERSION=$1
+EXPLICIT_VERSION=$1
+NO_BUMP=false
 
-if [ -z "$VERSION" ]; then
-  echo "❌ Error: Version number required"
-  echo "Usage: ./scripts/release.sh [version]"
-  echo "Example: ./scripts/release.sh 0.1.17"
-  exit 1
+# Check for --noBump flag
+if [ "$1" == "--noBump" ]; then
+  NO_BUMP=true
+  EXPLICIT_VERSION=""
+elif [ "$2" == "--noBump" ]; then
+  NO_BUMP=true
 fi
 
-# Validate version format (basic check)
+# Get current version from package.json
+CURRENT_VERSION=$(jq -r '.version' package.json 2>/dev/null || grep '"version"' package.json | head -1 | sed 's/.*"version": "\([^"]*\)".*/\1/')
+
+# Determine version to use
+if [ -n "$EXPLICIT_VERSION" ] && [ "$EXPLICIT_VERSION" != "--noBump" ]; then
+  # Explicit version provided
+  VERSION="$EXPLICIT_VERSION"
+elif [ "$NO_BUMP" = true ]; then
+  # Use current version without bumping
+  VERSION="$CURRENT_VERSION"
+else
+  # Auto-bump patch version
+  IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT_VERSION"
+  PATCH=$((PATCH + 1))
+  VERSION="$MAJOR.$MINOR.$PATCH"
+fi
+
+# Validate version format
 if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
   echo "❌ Error: Invalid version format. Use semantic versioning (e.g., 0.1.17)"
   exit 1
 fi
 
+# Show what we're doing
+if [ "$VERSION" != "$CURRENT_VERSION" ]; then
+  echo "📌 Version will be bumped: $CURRENT_VERSION → $VERSION"
+else
+  echo "📌 Releasing current version: $VERSION (no bump)"
+fi
+echo ""
+
 echo "🚀 Starting release process for v$VERSION"
+echo ""
+
+# Pre-check: Verify embeddings are up-to-date
+echo "🔍 Pre-check: Verifying embeddings are current..."
+PROMPTS_MODIFIED=$(stat -c %Y embeds/prompts/*.prompt.md 2>/dev/null | sort -n | tail -1 || echo 0)
+AGENTS_MODIFIED=$(stat -c %Y embeds/agents/*.agent.md 2>/dev/null | sort -n | tail -1 || echo 0)
+PROTECTED_MODIFIED=$(stat -c %Y embeds/protected/* 2>/dev/null | sort -n | tail -1 || echo 0)
+PROMPTS_STORE_MODIFIED=$(stat -c %Y src/promptStore.ts 2>/dev/null || echo 0)
+AGENTS_STORE_MODIFIED=$(stat -c %Y src/agentStore.ts 2>/dev/null || echo 0)
+
+# Compare timestamps to determine if re-embedding is needed
+NEEDS_EMBED=false
+if [ "$PROMPTS_MODIFIED" -gt "$PROMPTS_STORE_MODIFIED" ]; then
+  NEEDS_EMBED=true
+fi
+if [ "$AGENTS_MODIFIED" -gt "$AGENTS_STORE_MODIFIED" ]; then
+  NEEDS_EMBED=true
+fi
+if [ "$PROTECTED_MODIFIED" -gt "$AGENTS_STORE_MODIFIED" ]; then
+  NEEDS_EMBED=true
+fi
+
+if [ "$NEEDS_EMBED" = true ]; then
+  echo "⚠️  Embeddings are stale - source files have been updated"
+  echo "🔨 Auto-running embed-all..."
+  npm run embed-all
+  echo "✅ Embeddings refreshed"
+else
+  echo "✅ Embeddings are current"
+fi
 echo ""
 
 # Step 1: Update version in package.json

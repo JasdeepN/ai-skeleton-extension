@@ -88,7 +88,7 @@ function verifyPrompts() {
     'think': 'think',
   };
 
-  const promptsDir = path.join(__dirname, '..', 'prompts');
+  const promptsDir = path.join(__dirname, '..', 'embeds', 'prompts');
   const embedded = extractEmbeddedContent(
     path.join(__dirname, '..', 'src', 'promptStore.ts'),
     'prompt'
@@ -135,9 +135,9 @@ function verifyPrompts() {
 }
 
 function verifyAgents() {
-  console.log(`\n${colors.blue}=== Verifying Agents ===${colors.reset}`);
+  console.log(`\n${colors.bold}=== Verifying Agents ===${colors.reset}`);
 
-  const agentsDir = path.join(__dirname, '..', 'agents');
+  const agentsDir = path.join(__dirname, '..', 'embeds', 'agents');
   const embedded = extractEmbeddedContent(
     path.join(__dirname, '..', 'src', 'agentStore.ts'),
     'agent'
@@ -183,9 +183,9 @@ function verifyAgents() {
 }
 
 function verifyProtectedFiles() {
-  console.log(`\n${colors.blue}=== Verifying Protected Files ===${colors.reset}`);
+  console.log(`\n${colors.bold}=== Verifying Protected Files ===${colors.reset}`);
 
-  const protectedDir = path.join(__dirname, '..', 'protected');
+  const protectedDir = path.join(__dirname, '..', 'embeds', 'protected');
   const embedded = extractEmbeddedContent(
     path.join(__dirname, '..', 'src', 'agentStore.ts'),
     'file'

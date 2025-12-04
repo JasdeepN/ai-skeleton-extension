@@ -12,8 +12,8 @@
 const fs = require('fs');
 const path = require('path');
 
-const AGENTS_DIR = path.resolve(__dirname, '../agents');
-const PROTECTED_DIR = path.resolve(__dirname, '../protected');
+const AGENTS_DIR = path.resolve(__dirname, '../embeds/agents');
+const PROTECTED_DIR = path.resolve(__dirname, '../embeds/protected');
 const OUTPUT_FILE = path.resolve(__dirname, '../src/agentStore.ts');
 
 /**
@@ -206,7 +206,7 @@ export function getProtectedFilesEmbedded(): ProtectedFile[] {
 }
 
 // Main execution
-console.log('\\n🔧 Embedding agents into agentStore.ts...\\n');
+console.log('\n🔧 Embedding agents into agentStore.ts...\n');
 
 try {
   const agents = readAgentFiles();
@@ -215,9 +215,9 @@ try {
   
   fs.writeFileSync(OUTPUT_FILE, tsCode, 'utf8');
   
-  console.log(`\\n✅ Successfully generated ${OUTPUT_FILE}`);
-  console.log(`   Embedded ${agents.length} agents, ${protectedFiles.length} protected files\\n`);
+  console.log(`\n✅ Successfully generated ${OUTPUT_FILE}`);
+  console.log(`   Embedded ${agents.length} agents, ${protectedFiles.length} protected files\n`);
 } catch (error) {
-  console.error('\\n❌ Error embedding agents:', error.message);
+  console.error('\n❌ Error embedding agents:', error.message);
   process.exit(1);
 }
