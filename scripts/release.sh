@@ -58,15 +58,44 @@ npm run test:verify-embeddings || {
 echo "✅ All embeddings valid - Ready for release"
 echo ""
 
-# Step 5: Update CHANGELOG (manual prompt)
-echo "📋 Step 5: Update CHANGELOG.md"
-echo "⚠️  Please ensure CHANGELOG.md is updated with release notes for v$VERSION"
-read -p "Press Enter when CHANGELOG is ready, or Ctrl+C to abort..."
+# Step 5: Auto-generate CHANGELOG entry
+echo "📋 Step 5: Generating CHANGELOG entry..."
+CHANGELOG_ENTRY="## $VERSION - $(date +%Y-%m-%d)
+
+### Fixed
+- Updated embedded agent and prompt assets
+
+### Technical
+- Re-embedded prompts and agents with latest updates
+- Verified all embeddings match source files
+"
+
+# Check if entry already exists
+if grep -q "## $VERSION" CHANGELOG.md; then
+  echo "ℹ️  CHANGELOG entry for v$VERSION already exists, skipping auto-generation"
+else
+  # Insert after first # Changelog line
+  awk -v entry="$CHANGELOG_ENTRY" 'NR==1{print; print ""; print entry; next} 1' CHANGELOG.md > CHANGELOG.md.tmp
+  mv CHANGELOG.md.tmp CHANGELOG.md
+  echo "✅ Auto-generated CHANGELOG entry for v$VERSION"
+fi
+echo ""
+echo "📝 CHANGELOG.md is ready - you can edit it now if needed"
+read -p "Press Enter to continue with commit, or Ctrl+C to abort and make changes..."
 echo ""
 
-# Step 6: Git commit
-echo "💾 Step 6: Committing changes..."
+# Step 6: Git add and show status
+echo "💾 Step 6: Staging changes..."
 git add src/promptStore.ts src/agentStore.ts package.json CHANGELOG.md dist/
+echo ""
+echo "📊 Changes to be committed:"
+git status --short
+echo ""
+read -p "Press Enter to commit, or Ctrl+C to abort and modify files..."
+echo ""
+
+# Step 7: Git commit
+echo "💾 Step 7: Committing changes..."
 git commit -m "chore: release v$VERSION
 
 - Re-embedded prompts and agents with latest updates
@@ -76,14 +105,14 @@ git commit -m "chore: release v$VERSION
 echo "✅ Changes committed"
 echo ""
 
-# Step 7: Push to main
-echo "⬆️  Step 7: Pushing to main..."
+# Step 8: Push to main
+echo "⬆️  Step 8: Pushing to main..."
 git push origin main
 echo "✅ Pushed to main"
 echo ""
 
-# Step 8: Create and push tag
-echo "🏷️  Step 8: Creating and pushing tag v$VERSION..."
+# Step 9: Create and push tag
+echo "🏷️  Step 9: Creating and pushing tag v$VERSION..."
 git tag -f "v$VERSION"
 git push -f origin "v$VERSION"
 echo "✅ Tag v$VERSION created and pushed"

@@ -2,7 +2,7 @@
   "name": "ai-skeleton-extension",
   "displayName": "AI Skeleton Prompts & Memory",
   "description": "Complete AI agent toolkit: Native memory management (AI-Memory), workflow prompts, MCP integration, and agent definitions.",
-  "version": "0.1.18",
+  "version": "0.1.19",
   "publisher": "JasdeepN",
   "license": "SEE LICENSE IN LICENSE",
   "repository": {
@@ -143,8 +143,7 @@
       {
         "command": "aiSkeleton.diagnostics.openReadme",
         "title": "AI Skeleton: Open README"
-      }
-      ,
+      },
       {
         "command": "aiSkeleton.startMCPs",
         "title": "AI Skeleton: Start MCP Servers"

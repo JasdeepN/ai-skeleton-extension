@@ -1,5 +1,44 @@
 # Changelog
 
+## 0.1.19 - 2025-12-04
+
+### Fixed
+- **Wildcard Tool Declarations**: Fixed agent tool wildcards not working in marketplace releases
+  - v0.1.17 had stale embedded agent without proper wildcard support
+  - Re-embedded agent with correct `jasdeepn.ai-skeleton-extension/*` declarations
+  - MCP tool wildcards now work: `sequential-thinking/*`, `fetch/*`, `filesystem/*`, `git/*`
+- **Release Workflow**: Removed verification gate from marketplace publish workflow
+  - Publish workflow no longer requires verify-embeddings script (which doesn't exist in older tags)
+  - Tags are immutable and already verified by build workflow (GATE #2)
+  - Marketplace publishes pre-verified VSIX from GitHub Release
+
+### Changed
+- **Gate Architecture**: Updated from three-layer to two-layer gate system
+  - GATE #1 (Local): Release script verifies before commit
+  - GATE #2 (CI): Build workflow verifies before GitHub Release
+  - Marketplace: Publishes pre-verified tags (no re-verification needed)
+- **Release Script**: Auto-generates CHANGELOG entries with option to edit
+  - Generates basic entry automatically for each version
+  - Allows review and modification before commit
+  - Shows git status before committing for transparency
+
+### Technical
+- Updated RELEASE.md documentation to reflect two-layer gate system
+- Clarified that marketplace publishes from immutable, pre-verified tags
+
+## 0.1.18 - 2025-12-03
+
+### Fixed
+- **Critical**: Corrected agent tool names and MCP declarations
+  - Removed OLD embedded tool names (JasdeepN.ai-skeleton-prompts/*)
+  - Removed duplicate/incorrect MCP prefixes (modelcontextprotocol.servers/*)
+  - Re-embedded agent with correct jasdeepn.ai-skeleton-extension/* wildcard
+  - Cleaned up agent tools list (removed duplicates)
+
+### Note
+- v0.1.18 was built but never published to marketplace due to workflow issues
+- v0.1.19 supersedes this release with additional fixes
+
 ## 0.1.17 - 2025-12-03
 
 ### Fixed
