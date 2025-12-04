@@ -48,14 +48,24 @@ npm run compile
 echo "✅ Extension built"
 echo ""
 
-# Step 4: Update CHANGELOG (manual prompt)
-echo "📋 Step 4: Update CHANGELOG.md"
+# Step 4: Verify embeddings (GATE - must pass before release)
+echo "🔍 Step 4: Verifying embeddings..."
+npm run test:verify-embeddings || {
+  echo "❌ Embedding verification failed!"
+  echo "⚠️  Run 'npm run embed-all' to fix, then try again"
+  exit 1
+}
+echo "✅ All embeddings valid - Ready for release"
+echo ""
+
+# Step 5: Update CHANGELOG (manual prompt)
+echo "📋 Step 5: Update CHANGELOG.md"
 echo "⚠️  Please ensure CHANGELOG.md is updated with release notes for v$VERSION"
 read -p "Press Enter when CHANGELOG is ready, or Ctrl+C to abort..."
 echo ""
 
-# Step 5: Git commit
-echo "💾 Step 5: Committing changes..."
+# Step 6: Git commit
+echo "💾 Step 6: Committing changes..."
 git add src/promptStore.ts src/agentStore.ts package.json CHANGELOG.md dist/
 git commit -m "chore: release v$VERSION
 
@@ -66,14 +76,14 @@ git commit -m "chore: release v$VERSION
 echo "✅ Changes committed"
 echo ""
 
-# Step 6: Push to main
-echo "⬆️  Step 6: Pushing to main..."
+# Step 7: Push to main
+echo "⬆️  Step 7: Pushing to main..."
 git push origin main
 echo "✅ Pushed to main"
 echo ""
 
-# Step 7: Create and push tag
-echo "🏷️  Step 7: Creating and pushing tag v$VERSION..."
+# Step 8: Create and push tag
+echo "🏷️  Step 8: Creating and pushing tag v$VERSION..."
 git tag -f "v$VERSION"
 git push -f origin "v$VERSION"
 echo "✅ Tag v$VERSION created and pushed"
