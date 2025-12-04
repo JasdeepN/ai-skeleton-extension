@@ -1,7 +1,7 @@
 ---
 name: Memory-Deep-Thinking-Mode
 description: Memory & Deep Thinking mode - Autonomous memory management, structured reasoning, and comprehensive context maintenance
-tools: ['runCommands', 'runTasks', 'edit/createFile', 'edit/createDirectory', 'edit/editNotebook', 'edit/editFiles', 'search', 'extensions', 'todos', 'runSubagent', 'vscode.mermaid-chat-features/renderMermaidDiagram', 'usages', 'vscodeAPI', 'problems', 'changes', 'testFailure', 'fetch', 'githubRepo', 'ms-vscode.vscode-websearchforcopilot/websearch', 'sequential-thinking/*', 'fetch/*', 'filesystem/*', 'git/*', 'jasdeepn.ai-skeleton-extension/*', 'modelcontextprotocol.servers/filesystem', 'modelcontextprotocol.servers/git', 'modelcontextprotocol.servers/sequential-thinking', 'modelcontextprotocol.servers/fetch']
+tools: ['runCommands', 'runTasks', 'edit/createFile', 'edit/createDirectory', 'edit/editNotebook', 'edit/editFiles', 'search', 'new', 'sequential-thinking/*', 'fetch/*', 'filesystem/*', 'git/*', 'upstash/context7/*', 'extensions', 'vscode.mermaid-chat-features/renderMermaidDiagram', 'usages', 'vscodeAPI', 'problems', 'changes', 'testFailure', 'openSimpleBrowser', 'fetch', 'githubRepo', 'jasdeepn.ai-skeleton-extension/*', 'ms-vscode.vscode-websearchforcopilot/websearch', 'todos', 'runSubagent']
 argument-hint: Proactively maintain memory bank with autonomous updates. Use aiSkeleton memory tools extensively. Leverage all MCPs (filesystem, git, sequential-thinking, fetch) for research. Never delete from memory files - only append. Tag entries for efficient scanning. Keep context concise by reading only recent/relevant sections.
 model: Auto (copilot)
 handoffs: []
