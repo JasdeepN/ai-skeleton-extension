@@ -450,7 +450,8 @@
   "scripts": {
     "embed-prompts": "node scripts/embed-prompts.js",
     "embed-agents": "node scripts/embed-agents.js",
-    "embed-all": "npm run embed-prompts && npm run embed-agents",
+    "embed-memory": "node scripts/embed-memory.js",
+    "embed-all": "npm run embed-prompts && npm run embed-agents && npm run embed-memory",
     "build": "npm run embed-all && tsc -p .",
     "compile": "tsc -p .",
     "watch": "tsc -w",

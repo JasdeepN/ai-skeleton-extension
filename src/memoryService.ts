@@ -2,6 +2,7 @@
 // Provides file operations for AI-Memory/*.md files with auto-detection and timestamps
 
 import * as vscode from 'vscode';
+import { getAllMemoryTemplates } from './memoryTemplateStore';
 
 export interface MemoryBankState {
   active: boolean;
@@ -170,7 +171,7 @@ export class MemoryBankService {
   }
 
   /**
-   * Create a new AI-Memory folder with initial files
+   * Create a new AI-Memory folder with initial files from embedded templates
    */
   async createMemoryBank(folder?: vscode.WorkspaceFolder): Promise<boolean> {
     const ws = vscode.workspace.workspaceFolders;
@@ -185,116 +186,14 @@ export class MemoryBankService {
     try {
       await vscode.workspace.fs.createDirectory(memoryPath);
 
-      // Create initial files with improved templates
-      const templates: Record<MemoryFileName, string> = {
-        'activeContext.md': `# Active Context
-
-## Current Goals
-
-- Goal 1
-- Goal 2
-
-## Current Blockers
-
-- None yet
-
----
-
-${this.formatTag('CONTEXT')} Initial setup - AI-Memory initialized
-`,
-        'decisionLog.md': `# Decision Log
-
-Track all architectural, technical, and project decisions here.
-Format: | Date | Decision | Rationale |
-
-| Date | Decision | Rationale |
-|------|----------|-----------|
-| ${this.getToday()} | Initialize AI-Memory | Setting up project memory management for AI context persistence |
-
----
-
-${this.formatTag('DECISION')} AI-Memory initialized | Providing persistent context across AI sessions
-`,
-        'systemPatterns.md': `# System Patterns
-
-## Technical Stack
-
-- Technology 1: Purpose
-- Technology 2: Purpose
-
-## Architectural Patterns
-
-- Pattern 1: Description
-
-## Design Patterns
-
-- Pattern 1: Description
-
-## Common Idioms
-
-- Idiom 1: Description
-
----
-
-${this.formatTag('PATTERN')} Initial setup: Document patterns as they emerge
-`,
-        'progress.md': `# Progress
-
-## Done
-
-- [x] Initialize AI-Memory
-
-## Doing
-
-- [ ] Current task
-
-## Next
-
-- [ ] Upcoming task
-
----
-
-${this.formatTag('PROGRESS')} Initialized tracking
-`,
-        'projectBrief.md': `# Project Brief
-
-## Overview
-
-Provide a high-level overview of the project.
-
-## Goals
-
-- Goal 1
-- Goal 2
-
-## Core Features
-
-- Feature 1
-- Feature 2
-
-## Technical Stack
-
-- Tech 1
-- Tech 2
-
-## Scope & Constraints
-
-Define the project scope and any constraints.
-
-## Success Criteria
-
-- Criterion 1
-- Criterion 2
-
----
-
-${this.formatTag('BRIEF')} Initial project brief created
-`
-      };
+      // Get embedded templates from memoryTemplateStore
+      const templates = getAllMemoryTemplates();
 
       for (const [filename, content] of Object.entries(templates)) {
         const filePath = vscode.Uri.joinPath(memoryPath, filename);
-        await vscode.workspace.fs.writeFile(filePath, this.encode(content));
+        // Add initialization timestamp to each file
+        const contentWithTimestamp = content.trimEnd() + `\n\n---\n\n${this.formatTag('CONTEXT')} AI-Memory initialized\n`;
+        await vscode.workspace.fs.writeFile(filePath, this.encode(contentWithTimestamp));
       }
 
       await this.detectMemoryBank();
