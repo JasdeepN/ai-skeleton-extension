@@ -300,6 +300,12 @@ export class MemoryBankService {
       });
       this.setActivity('write');
       this._cache.delete('DECISION');  // Invalidate cache
+      
+      // Export to markdown for immediate visibility
+      if (this._state.path) {
+        await exportSQLiteToMarkdown(this._state.path, this._store);
+      }
+      
       return true;
     } catch (err) {
       vscode.window.showErrorMessage(`Failed to log decision: ${err}`);
@@ -330,6 +336,12 @@ export class MemoryBankService {
       });
       this.setActivity('write');
       this._cache.delete('CONTEXT');
+      
+      // Export to markdown for immediate visibility
+      if (this._state.path) {
+        await exportSQLiteToMarkdown(this._state.path, this._store);
+      }
+      
       return true;
     } catch (err) {
       vscode.window.showErrorMessage(`Failed to update context: ${err}`);
@@ -363,6 +375,12 @@ export class MemoryBankService {
       });
       this.setActivity('write');
       this._cache.delete('PROGRESS');
+      
+      // Export to markdown for immediate visibility
+      if (this._state.path) {
+        await exportSQLiteToMarkdown(this._state.path, this._store);
+      }
+      
       return true;
     } catch (err) {
       vscode.window.showErrorMessage(`Failed to update progress: ${err}`);
@@ -394,6 +412,12 @@ export class MemoryBankService {
       });
       this.setActivity('write');
       this._cache.delete('PATTERN');
+      
+      // Export to markdown for immediate visibility
+      if (this._state.path) {
+        await exportSQLiteToMarkdown(this._state.path, this._store);
+      }
+      
       return true;
     } catch (err) {
       vscode.window.showErrorMessage(`Failed to update patterns: ${err}`);

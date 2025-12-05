@@ -286,7 +286,7 @@ export async function activate(context: vscode.ExtensionContext) {
     }
 
     let overwriteBehaviour: 'overwrite'|'skip'|'cancel' = 'overwrite';
-    if (existing.length) {
+    if (existing.length && !isTestMode) {
       const pick = await vscode.window.showInformationMessage(
         `Destination already contains ${existing.length} prompt files. Overwrite existing files?`,
         'Overwrite All', 'Skip existing', 'Cancel'
@@ -296,6 +296,9 @@ export async function activate(context: vscode.ExtensionContext) {
         return;
       }
       overwriteBehaviour = pick === 'Overwrite All' ? 'overwrite' : 'skip';
+    } else if (isTestMode && existing.length) {
+      // In test mode, default to skip existing files to avoid conflicts
+      overwriteBehaviour = 'skip';
     }
 
     // Progress UI
@@ -338,9 +341,13 @@ export async function activate(context: vscode.ExtensionContext) {
         progress.report({ increment: Math.round(100 * (done / total)), message: `${done}/${total}` });
       }
     });
-    vscode.window.showInformationMessage(`Installed prompts: ${written} installed, ${skipped} skipped into ${destDir.fsPath}`);
+
+    if (!isTestMode) {
+      vscode.window.showInformationMessage(`Installed prompts: ${written} installed, ${skipped} skipped into ${destDir.fsPath}`);
+    }
+
     // Optionally open the destination in editor: open first installed prompt
-    if (written > 0) {
+    if (written > 0 && !isTestMode) {
       for (const p of promptsToInstall) {
         const target = vscode.Uri.joinPath(destDir, p.filename);
         try {
@@ -488,7 +495,9 @@ export async function activate(context: vscode.ExtensionContext) {
         }
         done++; progress.report({ increment: Math.round(100 * done / total), message: `${done}/${total}` });
       }
-      vscode.window.showInformationMessage(`Installed ${written} agent files, skipped ${skipped}`);
+      if (!isTestMode) {
+        vscode.window.showInformationMessage(`Installed ${written} agent files, skipped ${skipped}`);
+      }
     });
   }));
 
@@ -941,7 +950,30 @@ export async function activate(context: vscode.ExtensionContext) {
 
     // Handle different update types based on entry structure
     if (typeof entry === 'object') {
-      if (entry.context) {
+      // Support both new format (type/content) and old format (specific fields)
+      if (entry.type && entry.content) {
+        // New format from tests/LM tools
+        const type = entry.type.toUpperCase();
+        if (type === 'CONTEXT') {
+          await memoryService.updateContext(entry.content);
+        } else if (type === 'DECISION' && entry.rationale) {
+          await memoryService.logDecision(entry.content, entry.rationale);
+        } else if (type === 'DECISION') {
+          // For decisions without explicit rationale, use content as both
+          await memoryService.logDecision(entry.content, '');
+        } else if (type === 'PROGRESS' && entry.status) {
+          await memoryService.updateProgress(entry.content, entry.status);
+        } else if (type === 'PROGRESS') {
+          // Default status for progress entries
+          await memoryService.updateProgress(entry.content, 'doing');
+        } else if (type === 'PATTERN' && entry.description) {
+          await memoryService.updateSystemPatterns(entry.content, entry.description);
+        } else if (type === 'PATTERN') {
+          // Pattern without description
+          await memoryService.updateSystemPatterns(entry.content, '');
+        }
+      } else if (entry.context) {
+        // Old format
         await memoryService.updateContext(entry.context);
       } else if (entry.decision && entry.rationale) {
         await memoryService.logDecision(entry.decision, entry.rationale);
