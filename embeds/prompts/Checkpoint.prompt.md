@@ -193,6 +193,8 @@ Before completing:
 
 ### Step 7: Cleanup & Archive
 
+**Critical cleanup:** Remove transient backups and temporary artifacts (e.g., `*.bak`, `*.bak-*`, ad-hoc workflow backups, stray build artifacts) so the workspace stays clean. Rely on git history for recovery instead of leaving local backup files.
+
 Organize completed work and remove temporary files:
 
 1. **Identify Temporary Files**
