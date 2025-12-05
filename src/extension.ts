@@ -29,27 +29,33 @@ export async function activate(context: vscode.ExtensionContext) {
     console.error('[Extension] Error details:', errMsg);
   }
 
-  // Show unified setup dialog if components are missing (only on first time)
-  // If user dismissed before, don't show again - they can use Command Palette
-  await showSetupDialog(context);
+  // Detect if running in test environment
+  const isTestEnvironment = process.env.VSCODE_TEST_ENV === 'true' || 
+                           context.extensionMode === vscode.ExtensionMode.Test;
 
-  // Check for updates to installed components (only if user hasn't dismissed update prompts)
-  const updateDismissedVersion = context.workspaceState.get<string>('aiSkeleton.updateDismissedVersion', '');
-  const currentVersion = vscode.extensions.getExtension('jasdeepn.ai-skeleton-extension')?.packageJSON?.version || '0.0.0';
-  
-  const hasUpdates = await checkForUpdates(context);
-  if (hasUpdates && updateDismissedVersion !== currentVersion) {
-    const action = await vscode.window.showInformationMessage(
-      '🔄 AI Skeleton has new component definitions. Merge updates while preserving your customizations?',
-      { modal: false },
-      'Merge Updates',
-      'Later'
-    );
-    if (action === 'Merge Updates') {
-      await reinstallAll(context);
-    } else {
-      // User chose "Later" or dismissed - remember for this version
-      await context.workspaceState.update('aiSkeleton.updateDismissedVersion', currentVersion);
+  // Show unified setup dialog if components are missing (only on first time)
+  // Skip in test environments to avoid dialog errors
+  if (!isTestEnvironment) {
+    await showSetupDialog(context);
+
+    // Check for updates to installed components (only if user hasn't dismissed update prompts)
+    const updateDismissedVersion = context.workspaceState.get<string>('aiSkeleton.updateDismissedVersion', '');
+    const currentVersion = vscode.extensions.getExtension('jasdeepn.ai-skeleton-extension')?.packageJSON?.version || '0.0.0';
+    
+    const hasUpdates = await checkForUpdates(context);
+    if (hasUpdates && updateDismissedVersion !== currentVersion) {
+      const action = await vscode.window.showInformationMessage(
+        '🔄 AI Skeleton has new component definitions. Merge updates while preserving your customizations?',
+        { modal: false },
+        'Merge Updates',
+        'Later'
+      );
+      if (action === 'Merge Updates') {
+        await reinstallAll(context);
+      } else {
+        // User chose "Later" or dismissed - remember for this version
+        await context.workspaceState.update('aiSkeleton.updateDismissedVersion', currentVersion);
+      }
     }
   }
 
