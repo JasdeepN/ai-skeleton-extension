@@ -392,6 +392,11 @@
           "id": "aiSkeletonMemory",
           "name": "AI-Memory",
           "icon": "$(database)"
+        },
+        {
+          "id": "aiSkeletonMCP",
+          "name": "MCP Servers",
+          "icon": "$(server)"
         }
       ]
     },

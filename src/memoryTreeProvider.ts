@@ -108,8 +108,9 @@ export class MemoryTreeProvider implements vscode.TreeDataProvider<MemoryTreeIte
 
 /**
  * Register the memory tree view
+ * Returns both treeView and provider for later access
  */
-export function registerMemoryTreeView(context: vscode.ExtensionContext): vscode.TreeView<MemoryTreeItem> {
+export function registerMemoryTreeView(context: vscode.ExtensionContext): { treeView: vscode.TreeView<MemoryTreeItem>; provider: MemoryTreeProvider } {
   const provider = new MemoryTreeProvider();
   
   const treeView = vscode.window.createTreeView('aiSkeletonMemory', {
@@ -126,5 +127,5 @@ export function registerMemoryTreeView(context: vscode.ExtensionContext): vscode
 
   context.subscriptions.push(treeView);
   
-  return treeView;
+  return { treeView, provider };
 }

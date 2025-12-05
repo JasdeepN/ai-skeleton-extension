@@ -5,6 +5,7 @@ import { PromptTreeProvider } from './treeProvider';
 import { getMemoryService } from './memoryService';
 import { registerMemoryTools } from './memoryTools';
 import { registerMemoryTreeView } from './memoryTreeProvider';
+import { registerMCPTreeView } from './mcpTreeProvider';
 import { getMCPConfigString, getMCPServerList } from './mcpStore';
 import { registerDiagnosticsView } from './diagnosticsProvider';
 import { maybeAutoStartMCPs, startMCPServers } from './mcpManager';
@@ -61,7 +62,10 @@ export async function activate(context: vscode.ExtensionContext) {
   registerMemoryTools(context);
 
   // Register memory tree view
-  const memoryTreeView = registerMemoryTreeView(context);
+  const { treeView: memoryTreeView, provider: memoryTreeProvider } = registerMemoryTreeView(context);
+
+  // Register MCP tree view
+  const { treeView: mcpTreeView, provider: mcpTreeProvider } = registerMCPTreeView(context);
 
   // Register diagnostics view (Activity Bar)
   registerDiagnosticsView(context);
@@ -902,6 +906,35 @@ export async function activate(context: vscode.ExtensionContext) {
     if (success) {
       vscode.window.showInformationMessage(`Pattern recorded: ${pattern}`);
     }
+  }));
+
+  // Generic memory update command (accepts context, progress, or pattern updates)
+  context.subscriptions.push(vscode.commands.registerCommand('aiSkeleton.memory.update', async (entry?: any) => {
+    if (!entry) {
+      await vscode.commands.executeCommand('aiSkeleton.memory.updateContext');
+      return;
+    }
+
+    // Handle different update types based on entry structure
+    if (typeof entry === 'object') {
+      if (entry.context) {
+        await memoryService.updateContext(entry.context);
+      } else if (entry.decision && entry.rationale) {
+        await memoryService.logDecision(entry.decision, entry.rationale);
+      } else if (entry.item && entry.status) {
+        await memoryService.updateProgress(entry.item, entry.status);
+      } else if (entry.pattern && entry.description) {
+        await memoryService.updateSystemPatterns(entry.pattern, entry.description);
+      }
+      vscode.window.showInformationMessage('Memory updated');
+    }
+  }));
+
+  // Refresh prompts tree view command
+  context.subscriptions.push(vscode.commands.registerCommand('aiSkeleton.prompts.refresh', async () => {
+    await reload();
+    provider.refresh();
+    vscode.window.showInformationMessage('Prompts tree refreshed');
   }));
 
   // React to configuration changes
