@@ -58,6 +58,7 @@ jobs:
         run: npm run test:e2e
 
       - name: Build VSIX package
+        if: matrix.node == '20.x'
         run: npm run package:vsix
 
       - name: Upload VSIX artifact
