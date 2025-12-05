@@ -34,11 +34,27 @@ jobs:
       - name: Run full test suite
         run: npm run test:coverage
 
+      - name: Upload coverage reports
+        uses: codecov/codecov-action@v4
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: ./coverage/coverage-final.json
+          flags: release
+          verbose: true
+          fail_ci_if_error: true
+
       - name: Run E2E tests (Linux)
         run: xvfb-run -a npm run test:e2e
 
-      - name: Build VSIX package
-        run: npm run package:vsix
+      - name: Download pre-release VSIX artifact
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION=$(jq -r '.version' package.json)
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+          mkdir -p vsix
+          gh release download "v$VERSION" -p "ai-skeleton-extension-$VERSION.vsix" -D vsix --clobber
+          ls -la vsix
 
       - name: Create release tag
         id: tag
@@ -64,7 +80,7 @@ jobs:
           artifacts: vsix/ai-skeleton-extension-*.vsix
 
       - name: Publish to VS Code Marketplace
-        run: npx vsce publish --pat ${{ secrets.VSCE_PAT }}
+        run: npx vsce publish --packagePath "vsix/ai-skeleton-extension-${{ env.VERSION }}.vsix" --pat ${{ secrets.VSCE_PAT }}
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
 
