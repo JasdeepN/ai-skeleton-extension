@@ -10,6 +10,9 @@ jobs:
   test:
     name: Test on ${{ matrix.os }} with Node ${{ matrix.node }}
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+      id-token: write
     
     strategy:
       fail-fast: false
@@ -41,7 +44,10 @@ jobs:
         if: matrix.os == 'ubuntu-latest' && matrix.node == '20.x'
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
-          fail_ci_if_error: false
+          files: ./coverage/coverage-final.json
+          flags: unittests
+          verbose: true
+          fail_ci_if_error: true
 
       - name: Run E2E tests (Linux)
         if: runner.os == 'Linux'
