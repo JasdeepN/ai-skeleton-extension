@@ -1,16 +1,18 @@
-name: Build on PR Merge (Pre-release)
+name: Build on PR Merge (Pre-release) [RETIRED]
 
-# Triggers ONLY on merged PRs to main/master
-# Force pushes to main do NOT trigger this workflow
-# Each merged PR auto-bumps minor version (0.1.0) and creates a GitHub pre-release
-# Pre-releases are NOT published to marketplace (could have bugs)
+# ⚠️ Retired workflow. Kept for history only.
+# This workflow is disabled to avoid confusion with the new dev→release pipeline.
+# To run legacy flow, manually dispatch and set ENABLE_LEGACY to true.
 
 on:
-  pull_request:
-    types: [closed]
-    branches:
-      - main
-      - master
+  workflow_dispatch:
+    inputs:
+      ENABLE_LEGACY:
+        description: "Set to true to run legacy pre-release workflow"
+        required: true
+        default: "false"
+        type: choice
+        options: ["false", "true"]
 
 permissions:
   contents: write
@@ -18,8 +20,7 @@ permissions:
 
 jobs:
   build-prerelease:
-    # Only run if PR was actually merged (not just closed)
-    if: github.event.pull_request.merged == true
+    if: ${{ github.event.inputs.ENABLE_LEGACY == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout main
