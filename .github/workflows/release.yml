@@ -47,7 +47,10 @@ jobs:
           git config user.name "Release Bot"
           git config user.email "release@bot.local"
           echo "VERSION=$VERSION" >> $GITHUB_ENV
-          git tag -a latest-stable -m "Release v$VERSION" || git tag -d latest-stable && git tag -a latest-stable -m "Release v$VERSION"
+          # Ensure latest-stable is recreated cleanly locally and remotely
+          git tag -d latest-stable 2>/dev/null || true
+          git push origin :refs/tags/latest-stable 2>/dev/null || true
+          git tag -a latest-stable -m "Release v$VERSION"
           git push origin latest-stable --force
 
       - name: Create GitHub Release
