@@ -450,7 +450,16 @@ export class MemoryStore {
     try {
       const data = this.db.export();
       const buffer = Buffer.from(data);
-      fs.writeFileSync(this.dbPath, buffer);
+      
+      // Ensure directory exists
+      const dir = path.dirname(this.dbPath);
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
+      
+      // Write with explicit sync to ensure it's flushed to disk
+      fs.writeFileSync(this.dbPath, buffer, { flag: 'w', mode: 0o666 });
+      console.log('[MemoryStore] Persisted database to:', this.dbPath, 'size:', buffer.length);
     } catch (err) {
       console.error('[MemoryStore] sql.js persist failed:', err);
     }

@@ -252,6 +252,9 @@ export class MemoryBankService {
         throw new Error('Failed to initialize database');
       }
 
+      // Small delay to ensure database file is written to disk
+      await new Promise(resolve => setTimeout(resolve, 100));
+
       // Create default memory files with initialized content
       const today = this.getToday();
       const defaultFiles: Record<string, string> = {
