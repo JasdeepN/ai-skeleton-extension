@@ -61,15 +61,18 @@ export class MemoryStore {
    * Attempts sql.js first (guaranteed), then optional better-sqlite3
    */
   async init(dbPath: string): Promise<boolean> {
-    // Allow re-initialization if path changes
-    if (this.isInitialized && this.dbPath === dbPath) {
+    // Check if file was deleted (test cleanup scenario)
+    const fileExists = fs.existsSync(dbPath);
+    
+    // Allow re-initialization if path changes OR if file was deleted
+    if (this.isInitialized && this.dbPath === dbPath && fileExists) {
       console.log('[MemoryStore] Already initialized with same path:', dbPath);
       return true;
     }
 
-    // If path changed, reset state
-    if (this.isInitialized && this.dbPath !== dbPath) {
-      console.log('[MemoryStore] Path changed from', this.dbPath, 'to', dbPath, '- reinitializing');
+    // If path changed OR file was deleted, reset state
+    if (this.isInitialized && (this.dbPath !== dbPath || !fileExists)) {
+      console.log('[MemoryStore] Reinitializing - path changed:', this.dbPath !== dbPath, 'file deleted:', !fileExists);
       this.isInitialized = false;
       this.db = null;
       this.backend = 'none';
