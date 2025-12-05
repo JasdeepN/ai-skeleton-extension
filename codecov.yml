@@ -1,0 +1,28 @@
+# Codecov Configuration
+# Enforces code coverage gates and quality metrics
+
+coverage:
+  precision: 2
+  round: down
+  range: "95..100"  # Coverage must stay between 95-100%
+  status:
+    project:
+      default:
+        target: 95%           # Minimum required coverage
+        threshold: 1%         # Allow 1% variance (e.g., 94% is failure)
+        base: auto
+
+ignore:
+  - "node_modules"
+  - "dist"
+  - "vsix"
+  - "coverage"
+
+# Carryforward coverage from base to avoid regressing on unrelated commits
+flag_carryforward: true
+
+# Comments
+comment:
+  require_changes: false      # Comment on all PRs, not just changes
+  require_base: false
+  require_head: true
