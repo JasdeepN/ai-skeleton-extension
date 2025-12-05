@@ -1,4 +1,6 @@
 import * as path from 'path';
+import * as fs from 'fs';
+import * as os from 'os';
 import { runTests } from '@vscode/test-electron';
 
 async function main() {
@@ -11,15 +13,27 @@ async function main() {
 		// Passed to --extensionTestsPath
 		const extensionTestsPath = path.resolve(__dirname, './suite/index');
 
+		// Create a temporary workspace folder for E2E tests
+		const testWorkspacePath = path.join(os.tmpdir(), `vscode-test-workspace-${Date.now()}`);
+		if (!fs.existsSync(testWorkspacePath)) {
+			fs.mkdirSync(testWorkspacePath, { recursive: true });
+		}
+
 		// Download VS Code, unzip it and run the integration test
 		await runTests({
 			extensionDevelopmentPath,
 			extensionTestsPath,
 			launchArgs: [
+				testWorkspacePath, // Open the test workspace
 				'--disable-extensions', // Disable other extensions
 				'--disable-workspace-trust', // Disable workspace trust dialog
 			],
 		});
+
+		// Clean up temporary workspace
+		if (fs.existsSync(testWorkspacePath)) {
+			fs.rmSync(testWorkspacePath, { recursive: true, force: true });
+		}
 	} catch (err) {
 		console.error('Failed to run tests:', err);
 		process.exit(1);
