@@ -46,3 +46,4 @@ AI-Memory/*
 !.github/
 !.github/workflows/
 
+BACKUP_*/
