@@ -72,7 +72,19 @@ export class MemoryStore {
         throw new Error('sql.js not found');
       }
 
-      const SQL = await initSqlJs();
+      // sql.js needs to locate the wasm file - provide the correct path
+      const SQL = await initSqlJs({
+        locateFile: (file: string) => {
+          // Try to locate wasm file from node_modules
+          try {
+            const resolved = require.resolve(`sql.js/dist/${file}`);
+            return resolved;
+          } catch {
+            // Fallback to just the filename
+            return file;
+          }
+        }
+      });
       
       // Try to load existing DB file
       let fileBuffer: Buffer | undefined;

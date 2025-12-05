@@ -18,7 +18,12 @@ async function resolvePrompts(): Promise<Prompt[]> {
 export async function activate(context: vscode.ExtensionContext) {
   // Initialize memory service
   const memoryService = getMemoryService();
-  await memoryService.detectMemoryBank();
+  try {
+    await memoryService.detectMemoryBank();
+    console.log('[Extension] Memory Bank detected:', memoryService.state);
+  } catch (err) {
+    console.error('[Extension] Memory Bank detection failed:', err);
+  }
 
   // Show unified setup dialog if components are missing (only on first time)
   // If user dismissed before, don't show again - they can use Command Palette
