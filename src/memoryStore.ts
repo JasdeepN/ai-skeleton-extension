@@ -72,17 +72,40 @@ export class MemoryStore {
         throw new Error('sql.js not found');
       }
 
+      console.log('[MemoryStore] Initializing sql.js with dbPath:', dbPath);
+
       // sql.js needs to locate the wasm file - provide the correct path
       const SQL = await initSqlJs({
         locateFile: (file: string) => {
-          // Try to locate wasm file from node_modules
+          // In VS Code extension context, resolve to absolute file path
           try {
-            const resolved = require.resolve(`sql.js/dist/${file}`);
-            return resolved;
-          } catch {
-            // Fallback to just the filename
-            return file;
+            const sqlJsPath = require.resolve('sql.js');
+            const sqlJsDir = path.dirname(sqlJsPath);
+            const distDir = path.join(sqlJsDir, 'dist');
+            const wasmPath = path.join(distDir, file);
+            
+            // Verify file exists
+            if (fs.existsSync(wasmPath)) {
+              console.log('[MemoryStore] Located wasm file:', wasmPath);
+              return wasmPath;
+            }
+          } catch (e) {
+            console.warn('[MemoryStore] Failed to resolve wasm from sql.js:', e);
           }
+          
+          // Fallback: try node_modules directly
+          try {
+            const fallbackPath = path.join(process.cwd(), 'node_modules', 'sql.js', 'dist', file);
+            if (fs.existsSync(fallbackPath)) {
+              console.log('[MemoryStore] Using fallback wasm path:', fallbackPath);
+              return fallbackPath;
+            }
+          } catch (e) {
+            console.warn('[MemoryStore] Fallback path also failed:', e);
+          }
+          
+          console.warn(`[MemoryStore] Could not locate wasm file: ${file}`);
+          return file;
         }
       });
       
@@ -90,8 +113,9 @@ export class MemoryStore {
       let fileBuffer: Buffer | undefined;
       try {
         fileBuffer = fs.readFileSync(dbPath);
-      } catch {
-        // File doesn't exist yet, will create new
+        console.log('[MemoryStore] Loaded existing database from:', dbPath);
+      } catch (err) {
+        console.log('[MemoryStore] Creating new database at:', dbPath);
       }
       
       this.db = new SQL.Database(fileBuffer);
@@ -102,13 +126,14 @@ export class MemoryStore {
       // Persist to disk
       this.persistSqlJs();
       
-      console.log('[MemoryStore] Using sql.js (WebAssembly SQLite) backend');
+      console.log('[MemoryStore] Using sql.js (WebAssembly SQLite) backend - SUCCESS');
       return true;
     } catch (err) {
       console.warn('[MemoryStore] sql.js initialization failed:', err);
       
       try {
         // Fallback to better-sqlite3 (optional, native)
+        console.log('[MemoryStore] Attempting fallback to better-sqlite3');
         const Database = require('better-sqlite3');
         if (!Database) {
           throw new Error('better-sqlite3 not available');
@@ -118,7 +143,7 @@ export class MemoryStore {
         this.backend = 'better-sqlite3';
         this.initializeSchema();
         this.isInitialized = true;
-        console.log('[MemoryStore] Using better-sqlite3 (native) backend');
+        console.log('[MemoryStore] Using better-sqlite3 (native) backend - SUCCESS');
         return true;
       } catch (fallbackErr) {
         console.error('[MemoryStore] Both backends failed:', fallbackErr);

@@ -104,6 +104,7 @@ export class MemoryBankService {
   async detectMemoryBank(): Promise<MemoryBankState> {
     const ws = vscode.workspace.workspaceFolders;
     if (!ws || !ws.length) {
+      console.warn('[MemoryService] No workspace folders found');
       this._state = {
         active: false,
         path: null,
@@ -115,18 +116,24 @@ export class MemoryBankService {
       return this._state;
     }
 
+    console.log('[MemoryService] Scanning for memory bank in', ws.length, 'workspace folder(s)');
+
     for (const folder of ws) {
       for (const folderName of FOLDER_NAMES) {
         const memoryPath = vscode.Uri.joinPath(folder.uri, folderName);
+        console.log('[MemoryService] Checking for memory at:', memoryPath.fsPath);
         try {
           const stat = await vscode.workspace.fs.stat(memoryPath);
           if (stat.type === vscode.FileType.Directory) {
+            console.log('[MemoryService] Found memory directory at:', memoryPath.fsPath);
+            
             // Initialize SQLite database
             const dbPath = path.join(memoryPath.fsPath, 'memory.db');
+            console.log('[MemoryService] Initializing database at:', dbPath);
             const initialized = await this._store.init(dbPath);
 
             if (!initialized) {
-              console.error('[MemoryService] Failed to initialize database');
+              console.error('[MemoryService] Failed to initialize database at:', dbPath);
               this._state = {
                 active: false,
                 path: memoryPath,
@@ -137,6 +144,8 @@ export class MemoryBankService {
               this._onDidChangeState.fire(this._state);
               return this._state;
             }
+
+            console.log('[MemoryService] Database initialized successfully');
 
             // Check if migration needed
             if (await isMigrationNeeded(memoryPath, this._store)) {
@@ -177,6 +186,13 @@ export class MemoryBankService {
               backend: this._store.getBackend(),
               files: filesState
             };
+            
+            console.log('[MemoryService] Memory bank detected:', {
+              active: this._state.active,
+              backend: this._state.backend,
+              files: filesState
+            });
+            
             this._onDidChangeState.fire(this._state);
             return this._state;
           }
