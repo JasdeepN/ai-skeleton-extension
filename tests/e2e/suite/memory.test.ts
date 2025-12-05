@@ -23,15 +23,24 @@ suite('AI-Memory E2E Tests', () => {
 		// Execute create command
 		await vscode.commands.executeCommand('aiSkeleton.memory.create');
 
-		// Wait for creation
-		await new Promise(resolve => setTimeout(resolve, 2000));
+		// Wait for creation with polling for database file
+		const dbPath = path.join(memoryPath, 'memory.db');
+		let attempts = 0;
+		const maxAttempts = 50; // 5 seconds total (50 * 100ms)
+		
+		while (attempts < maxAttempts) {
+			if (fs.existsSync(dbPath)) {
+				break;
+			}
+			await new Promise(resolve => setTimeout(resolve, 100));
+			attempts++;
+		}
 
 		// Verify folder exists
 		assert.ok(fs.existsSync(memoryPath), 'AI-Memory folder not created');
 
 		// Verify database file exists
-		const dbPath = path.join(memoryPath, 'memory.db');
-		assert.ok(fs.existsSync(dbPath), 'memory.db not created');
+		assert.ok(fs.existsSync(dbPath), `memory.db not created after ${attempts * 100}ms (max ${maxAttempts * 100}ms)`);
 
 		// Verify markdown files exist (exported from DB)
 		const expectedFiles = [
