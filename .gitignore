@@ -16,6 +16,7 @@ dist/
 tmp-*/
 tmp/
 test-output/
+.vscode-test/
 
 # OS files
 .DS_Store

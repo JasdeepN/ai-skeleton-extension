@@ -235,9 +235,13 @@ export async function activate(context: vscode.ExtensionContext) {
       return;
     }
 
-    // If multiple workspace folders, ask which one to use
+    // Detect test environment
+    const isTestMode = process.env.VSCODE_TEST_ENV === 'true' || 
+                      context.extensionMode === vscode.ExtensionMode.Test;
+
+    // If multiple workspace folders, ask which one to use (or use first in test mode)
     let folder: vscode.WorkspaceFolder;
-    if (ws.length === 1) {
+    if (ws.length === 1 || isTestMode) {
       folder = ws[0];
     } else {
       const pick = await vscode.window.showQuickPick(ws.map(f => ({ label: f.name, folder: f })), { placeHolder: 'Select workspace folder to install prompts into' });
@@ -245,13 +249,17 @@ export async function activate(context: vscode.ExtensionContext) {
       folder = pick.folder;
     }
 
-    // Decide source for installing prompts - prefer embedded so we don't copy workspace -> workspace by mistake
-    const sourcePick = await vscode.window.showQuickPick([
-      { label: 'Embedded (built-in prompts)', value: 'embedded' },
-      { label: 'Workspace prompts (if present)', value: 'workspace' }
-    ].map(x => ({ label: x.label, value: x.value } as any)), { placeHolder: 'Install prompts from:' });
-    if (!sourcePick) return;
-    const chosenSource = <'embedded'|'workspace'>(sourcePick as any).value || 'embedded';
+    // Decide source for installing prompts - in test mode always use embedded
+    let chosenSource: 'embedded' | 'workspace' = 'embedded';
+    if (!isTestMode) {
+      const sourcePick = await vscode.window.showQuickPick([
+        { label: 'Embedded (built-in prompts)', value: 'embedded' },
+        { label: 'Workspace prompts (if present)', value: 'workspace' }
+      ].map(x => ({ label: x.label, value: x.value } as any)), { placeHolder: 'Install prompts from:' });
+      if (!sourcePick) return;
+      chosenSource = <'embedded'|'workspace'>(sourcePick as any).value || 'embedded';
+    }
+    
     let promptsToInstall = await getPrompts(chosenSource);
     if (!promptsToInstall || !promptsToInstall.length) {
       // fallback to embedded
@@ -431,9 +439,15 @@ export async function activate(context: vscode.ExtensionContext) {
       vscode.window.showErrorMessage('No workspace folder open. Please open a workspace and try again.');
       return;
     }
+
+    // Detect test environment
+    const isTestMode = process.env.VSCODE_TEST_ENV === 'true' || 
+                      context.extensionMode === vscode.ExtensionMode.Test;
+
     let folder: vscode.WorkspaceFolder;
-    if (ws.length === 1) folder = ws[0];
-    else {
+    if (ws.length === 1 || isTestMode) {
+      folder = ws[0];
+    } else {
       const pick = await vscode.window.showQuickPick(ws.map(f => ({ label: f.name, folder: f })), { placeHolder: 'Select destination workspace folder for agents' });
       if (!pick) return;
       folder = pick.folder;
@@ -448,10 +462,14 @@ export async function activate(context: vscode.ExtensionContext) {
       try { await vscode.workspace.fs.stat(target); existing.push(agent.filename); } catch (e) {}
     }
 
-    if (existing.length) {
+    let overwriteBehaviour: 'overwrite' | 'skip' = 'skip';
+    if (existing.length && !isTestMode) {
       const pick = await vscode.window.showInformationMessage(`Destination contains ${existing.length} agent files. Overwrite?`, 'Overwrite All', 'Skip existing', 'Cancel');
       if (!pick || pick === 'Cancel') { vscode.window.showInformationMessage('Install agents canceled.'); return; }
-      var overwriteBehaviour = pick === 'Overwrite All' ? 'overwrite' : 'skip';
+      overwriteBehaviour = pick === 'Overwrite All' ? 'overwrite' : 'skip';
+    } else if (isTestMode && existing.length) {
+      // In test mode, default to skip existing files to avoid conflicts
+      overwriteBehaviour = 'skip';
     }
 
     await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: 'Installing agents to .github/agents', cancellable: false }, async (progress) => {
