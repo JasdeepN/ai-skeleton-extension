@@ -74,43 +74,42 @@ export class MemoryStore {
 
       console.log('[MemoryStore] Initializing sql.js with dbPath:', dbPath);
 
-      // sql.js needs to locate the wasm file - provide the correct path as file:// URL
-      const SQL = await initSqlJs({
-        locateFile: (file: string) => {
-          // In VS Code extension context, resolve to absolute file path and convert to file:// URL
-          try {
-            const sqlJsPath = require.resolve('sql.js');
-            const sqlJsDir = path.dirname(sqlJsPath);
-            const distDir = path.join(sqlJsDir, 'dist');
-            const wasmPath = path.join(distDir, file);
-            
-            // Verify file exists
-            if (fs.existsSync(wasmPath)) {
-              // Convert to file:// URL for sql.js
-              const fileUrl = 'file://' + wasmPath.replace(/\\/g, '/');
-              console.log('[MemoryStore] Located wasm file:', fileUrl);
-              return fileUrl;
-            }
-          } catch (e) {
-            console.warn('[MemoryStore] Failed to resolve wasm from sql.js:', e);
-          }
-          
-          // Fallback: try node_modules directly
-          try {
-            const fallbackPath = path.join(process.cwd(), 'node_modules', 'sql.js', 'dist', file);
-            if (fs.existsSync(fallbackPath)) {
-              const fileUrl = 'file://' + fallbackPath.replace(/\\/g, '/');
-              console.log('[MemoryStore] Using fallback wasm path:', fileUrl);
-              return fileUrl;
-            }
-          } catch (e) {
-            console.warn('[MemoryStore] Fallback path also failed:', e);
-          }
-          
-          console.warn(`[MemoryStore] Could not locate wasm file: ${file}`);
-          return file;
+      // Load WASM binary directly - this is the most reliable method
+      // sql.js's locateFile doesn't work well in VS Code extension context
+      let wasmBinary: Buffer | undefined;
+      
+      try {
+        const sqlJsPath = require.resolve('sql.js');
+        const distDir = path.dirname(sqlJsPath);
+        const wasmPath = path.join(distDir, 'sql-wasm.wasm');
+        
+        if (fs.existsSync(wasmPath)) {
+          wasmBinary = fs.readFileSync(wasmPath);
+          console.log('[MemoryStore] Loaded wasm binary from:', wasmPath, 'size:', wasmBinary.length);
         }
-      });
+      } catch (e) {
+        console.warn('[MemoryStore] Failed to load wasm from sql.js path:', e);
+      }
+      
+      // Fallback: try node_modules directly if first attempt failed
+      if (!wasmBinary) {
+        try {
+          const fallbackPath = path.join(process.cwd(), 'node_modules', 'sql.js', 'dist', 'sql-wasm.wasm');
+          if (fs.existsSync(fallbackPath)) {
+            wasmBinary = fs.readFileSync(fallbackPath);
+            console.log('[MemoryStore] Loaded wasm binary from fallback:', fallbackPath);
+          }
+        } catch (e) {
+          console.warn('[MemoryStore] Fallback wasm load also failed:', e);
+        }
+      }
+      
+      if (!wasmBinary) {
+        throw new Error('Could not locate sql-wasm.wasm file');
+      }
+
+      // Initialize with wasmBinary directly - most reliable method
+      const SQL = await initSqlJs({ wasmBinary });
       
       // Try to load existing DB file
       let fileBuffer: Buffer | undefined;
