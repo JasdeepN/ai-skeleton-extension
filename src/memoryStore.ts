@@ -61,7 +61,19 @@ export class MemoryStore {
    * Attempts sql.js first (guaranteed), then optional better-sqlite3
    */
   async init(dbPath: string): Promise<boolean> {
-    if (this.isInitialized) return true;
+    // Allow re-initialization if path changes
+    if (this.isInitialized && this.dbPath === dbPath) {
+      console.log('[MemoryStore] Already initialized with same path:', dbPath);
+      return true;
+    }
+
+    // If path changed, reset state
+    if (this.isInitialized && this.dbPath !== dbPath) {
+      console.log('[MemoryStore] Path changed from', this.dbPath, 'to', dbPath, '- reinitializing');
+      this.isInitialized = false;
+      this.db = null;
+      this.backend = 'none';
+    }
 
     this.dbPath = dbPath;
 
