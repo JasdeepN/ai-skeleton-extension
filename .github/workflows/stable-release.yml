@@ -1,15 +1,16 @@
-name: Stable Release (Promote to Marketplace)
+name: Stable Release (Promote to Marketplace) [RETIRED]
 
-# Manual workflow to promote a pre-release to stable and publish to Marketplace
-# Usage:
-#   1. Run 'Build on PR Merge' workflow first (creates pre-release)
-#   2. Test the pre-release manually
-#   3. Run this workflow to promote to stable
-#   4. Enter the version to promote (or leave blank for latest pre-release)
+# ⚠️ Retired workflow. Use dev → release PR + release.yml for publishing.
 
 on:
   workflow_dispatch:
     inputs:
+      ENABLE_LEGACY:
+        description: 'Set to true to run legacy stable promotion workflow'
+        required: true
+        default: 'false'
+        type: choice
+        options: ['false','true']
       version:
         description: 'Version to promote (e.g., 0.2.0). Leave blank to promote latest pre-release.'
         required: false
@@ -21,6 +22,7 @@ permissions:
 
 jobs:
   promote-to-stable:
+    if: ${{ github.event.inputs.ENABLE_LEGACY == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout main

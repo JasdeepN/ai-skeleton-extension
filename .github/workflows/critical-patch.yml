@@ -1,15 +1,19 @@
-name: Critical Patch (Emergency Fix to Marketplace)
+name: Critical Patch (Emergency Fix to Marketplace) [RETIRED]
 
-# Manual workflow for emergency patches between releases
-# Bumps patch version (0.0.1), builds from main, publishes directly to Marketplace
-# Use this for critical bugs that can't wait for a full PR/release cycle
+# ⚠️ Retired workflow. Use dev → release PR + release.yml. For true emergencies, merge hotfix into release and push.
 
 on:
   workflow_dispatch:
     inputs:
+      ENABLE_LEGACY:
+        description: 'Set to true to run legacy critical patch workflow'
+        required: true
+        default: 'false'
+        type: choice
+        options: ['false','true']
       description:
         description: 'What critical issue is this patch fixing?'
-        required: true
+        required: false
         type: string
       skip_marketplace:
         description: 'Skip marketplace publish (GitHub release only)?'
@@ -23,6 +27,7 @@ permissions:
 
 jobs:
   critical-patch:
+    if: ${{ github.event.inputs.ENABLE_LEGACY == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout main

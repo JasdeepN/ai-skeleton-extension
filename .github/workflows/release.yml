@@ -1,13 +1,12 @@
 name: Release to Marketplace
 
 on:
-  pull_request:
+  push:
     branches: [release]
-    types: [closed]
+  workflow_dispatch:
 
 jobs:
   release:
-    if: github.event.pull_request.merged == true
     name: Release & Publish
     runs-on: ubuntu-latest
     permissions:
@@ -29,17 +28,25 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Compile TypeScript
+        run: npm run compile
+
       - name: Run full test suite
         run: npm run test:coverage
+
+      - name: Run E2E tests (Linux)
+        run: xvfb-run -a npm run test:e2e
 
       - name: Build VSIX package
         run: npm run package:vsix
 
       - name: Create release tag
+        id: tag
         run: |
           VERSION=$(jq -r '.version' package.json)
           git config user.name "Release Bot"
           git config user.email "release@bot.local"
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
           git tag -a latest-stable -m "Release v$VERSION" || git tag -d latest-stable && git tag -a latest-stable -m "Release v$VERSION"
           git push origin latest-stable --force
 

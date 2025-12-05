@@ -1,16 +1,19 @@
-name: Minor Release (Incremental Update to Marketplace)
+name: Minor Release (Incremental Update to Marketplace) [RETIRED]
 
-# Manual workflow for minor incremental updates between major releases
-# Bumps patch version (0.0.1), builds from main, publishes to Marketplace
-# Use this for small improvements, non-critical bug fixes, documentation updates, etc.
-# For emergencies, use Critical Patch workflow instead
+# ⚠️ Retired workflow. Use dev → release PR + release.yml instead.
 
 on:
   workflow_dispatch:
     inputs:
+      ENABLE_LEGACY:
+        description: 'Set to true to run legacy minor release workflow'
+        required: true
+        default: 'false'
+        type: choice
+        options: ['false','true']
       description:
         description: 'What changes are included in this minor release?'
-        required: true
+        required: false
         type: string
       skip_marketplace:
         description: 'Skip marketplace publish (GitHub release only)?'
@@ -24,6 +27,7 @@ permissions:
 
 jobs:
   minor-release:
+    if: ${{ github.event.inputs.ENABLE_LEGACY == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout main

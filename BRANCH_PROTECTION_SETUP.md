@@ -4,6 +4,10 @@
 
 To complete the workflow setup, configure GitHub branch protection rules for the `release` branch:
 
+### Set default branch to `dev`
+- In GitHub → Settings → Branches → Default branch: **set to `dev`**.
+- Rationale: all development happens on `dev`; `release` is protected and only updated via PR merges.
+
 ### Steps
 1. Go to: https://github.com/JasdeepN/ai-skeleton-extension/settings/branches
 2. Add rule for branch: `release`
