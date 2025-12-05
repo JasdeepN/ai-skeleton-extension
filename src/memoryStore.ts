@@ -74,10 +74,10 @@ export class MemoryStore {
 
       console.log('[MemoryStore] Initializing sql.js with dbPath:', dbPath);
 
-      // sql.js needs to locate the wasm file - provide the correct path
+      // sql.js needs to locate the wasm file - provide the correct path as file:// URL
       const SQL = await initSqlJs({
         locateFile: (file: string) => {
-          // In VS Code extension context, resolve to absolute file path
+          // In VS Code extension context, resolve to absolute file path and convert to file:// URL
           try {
             const sqlJsPath = require.resolve('sql.js');
             const sqlJsDir = path.dirname(sqlJsPath);
@@ -86,8 +86,10 @@ export class MemoryStore {
             
             // Verify file exists
             if (fs.existsSync(wasmPath)) {
-              console.log('[MemoryStore] Located wasm file:', wasmPath);
-              return wasmPath;
+              // Convert to file:// URL for sql.js
+              const fileUrl = 'file://' + wasmPath.replace(/\\/g, '/');
+              console.log('[MemoryStore] Located wasm file:', fileUrl);
+              return fileUrl;
             }
           } catch (e) {
             console.warn('[MemoryStore] Failed to resolve wasm from sql.js:', e);
@@ -97,8 +99,9 @@ export class MemoryStore {
           try {
             const fallbackPath = path.join(process.cwd(), 'node_modules', 'sql.js', 'dist', file);
             if (fs.existsSync(fallbackPath)) {
-              console.log('[MemoryStore] Using fallback wasm path:', fallbackPath);
-              return fallbackPath;
+              const fileUrl = 'file://' + fallbackPath.replace(/\\/g, '/');
+              console.log('[MemoryStore] Using fallback wasm path:', fileUrl);
+              return fileUrl;
             }
           } catch (e) {
             console.warn('[MemoryStore] Fallback path also failed:', e);

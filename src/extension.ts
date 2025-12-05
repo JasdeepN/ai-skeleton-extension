@@ -19,10 +19,13 @@ export async function activate(context: vscode.ExtensionContext) {
   // Initialize memory service
   const memoryService = getMemoryService();
   try {
+    console.log('[Extension] Activating extension...');
     await memoryService.detectMemoryBank();
     console.log('[Extension] Memory Bank detected:', memoryService.state);
   } catch (err) {
     console.error('[Extension] Memory Bank detection failed:', err);
+    const errMsg = err instanceof Error ? err.message : String(err);
+    console.error('[Extension] Error details:', errMsg);
   }
 
   // Show unified setup dialog if components are missing (only on first time)
