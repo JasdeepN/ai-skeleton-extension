@@ -52,8 +52,19 @@ function extractEmbeddedContent(storePath) {
 }
 
 describe('Embedding Integrity Tests', () => {
+  // ID mapping (same as embed-prompts.js)
+  const promptIdMap = {
+    'gh': 'githubActions',
+    'sync': 'sync'
+  };
+  
+  function derivePromptId(filename) {
+    const base = filename.replace(/\.prompt\.md$/, '').toLowerCase();
+    return promptIdMap[base] || base;
+  }
+
   describe('Prompts', () => {
-    const promptsDir = path.join(__dirname, '..', 'prompts');
+    const promptsDir = path.join(__dirname, '..', 'embeds', 'prompts');
     const embedded = extractEmbeddedContent(
       path.join(__dirname, '..', 'src', 'promptStore.ts')
     );
@@ -66,14 +77,14 @@ describe('Embedding Integrity Tests', () => {
       expect(sourceFiles.length).toBeGreaterThan(0);
 
       for (const file of sourceFiles) {
-        const id = file.replace(/\.prompt\.md$/, '').toLowerCase();
+        const id = derivePromptId(file);
         expect(embedded).toHaveProperty(id);
       }
     });
 
     sourceFiles.forEach(file => {
       test(`prompt ${file} has matching hash`, () => {
-        const id = file.replace(/\.prompt\.md$/, '').toLowerCase();
+        const id = derivePromptId(file);
         const filepath = path.join(promptsDir, file);
         const sourceContent = readFile(filepath);
 
@@ -92,7 +103,7 @@ describe('Embedding Integrity Tests', () => {
 
     test('embedded prompt metadata is correct', () => {
       sourceFiles.forEach(file => {
-        const id = file.replace(/\.prompt\.md$/, '').toLowerCase();
+        const id = derivePromptId(file);
         const embeddedData = embedded[id];
 
         expect(embeddedData).toBeDefined();
@@ -113,7 +124,7 @@ describe('Embedding Integrity Tests', () => {
   });
 
   describe('Agents', () => {
-    const agentsDir = path.join(__dirname, '..', 'agents');
+    const agentsDir = path.join(__dirname, '..', 'embeds', 'agents');
     const embedded = extractEmbeddedContent(
       path.join(__dirname, '..', 'src', 'agentStore.ts')
     );
@@ -164,7 +175,10 @@ describe('Embedding Integrity Tests', () => {
     });
 
     test('all embedded agents have valid YAML frontmatter', () => {
-      for (const [id, data] of Object.entries(embedded)) {
+      // Only check actual agent files (exclude protected files)
+      for (const file of sourceFiles) {
+        const id = file.replace(/\.agent\.md$/, '').toLowerCase();
+        const data = embedded[id];
         // Agents should start with YAML frontmatter
         expect(data.content).toMatch(/^---\nname:/);
       }
@@ -174,8 +188,10 @@ describe('Embedding Integrity Tests', () => {
       const agentContent = embedded['memory-deep-think']?.content;
       expect(agentContent).toBeDefined();
 
-      // Verify correct tool names are used
-      expect(agentContent).toContain('jasdeepn.ai-skeleton-extension/*');
+      // Verify correct tool names are used (individual tools, not wildcard)
+      expect(agentContent).toContain('jasdeepn.ai-skeleton-extension/showMemory');
+      expect(agentContent).toContain('jasdeepn.ai-skeleton-extension/logDecision');
+      expect(agentContent).toContain('jasdeepn.ai-skeleton-extension/updateContext');
 
       // Verify old/incorrect tool names are NOT present
       expect(agentContent).not.toContain('JasdeepN.ai-skeleton-prompts');
@@ -288,8 +304,8 @@ describe('Embedding Integrity Tests', () => {
   describe('Release Readiness Checks', () => {
     test('all embeddings are up to date', () => {
       // This is the master test that ensures nothing slipped through
-      const promptsDir = path.join(__dirname, '..', 'prompts');
-      const agentsDir = path.join(__dirname, '..', 'agents');
+      const promptsDir = path.join(__dirname, '..', 'embeds', 'prompts');
+      const agentsDir = path.join(__dirname, '..', 'embeds', 'agents');
 
       const promptEmbedded = extractEmbeddedContent(
         path.join(__dirname, '..', 'src', 'promptStore.ts')
@@ -309,7 +325,7 @@ describe('Embedding Integrity Tests', () => {
       const mismatches = [];
 
       prompts.forEach(file => {
-        const id = file.replace(/\.prompt\.md$/, '').toLowerCase();
+        const id = derivePromptId(file);
         const filepath = path.join(promptsDir, file);
         const sourceContent = readFile(filepath);
         const sourceHash = hash(sourceContent);

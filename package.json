@@ -2,7 +2,7 @@
   "name": "ai-skeleton-extension",
   "displayName": "AI Skeleton Prompts & Memory",
   "description": "Complete AI agent toolkit: Native memory management (AI-Memory), workflow prompts, MCP integration, and agent definitions.",
-  "version": "0.1.22",
+  "version": "0.1.24",
   "publisher": "JasdeepN",
   "license": "SEE LICENSE IN LICENSE",
   "repository": {
@@ -18,7 +18,7 @@
   "activationEvents": [
     "onStartupFinished"
   ],
-  "main": "./dist/extension.js",
+  "main": "./dist/src/extension.js",
   "contributes": {
     "configuration": {
       "properties": {
@@ -455,8 +455,7 @@
   "scripts": {
     "embed-prompts": "node scripts/embed-prompts.js",
     "embed-agents": "node scripts/embed-agents.js",
-    "embed-memory": "node scripts/embed-memory.js",
-    "embed-all": "npm run embed-prompts && npm run embed-agents && npm run embed-memory",
+    "embed-all": "npm run embed-prompts && npm run embed-agents",
     "build": "npm run embed-all && tsc -p .",
     "compile": "tsc -p .",
     "watch": "tsc -w",
@@ -464,6 +463,8 @@
     "test:verify-embeddings": "node scripts/verify-embeddings.js",
     "test:embeddings": "jest tests/embeddings.test.js",
     "test": "jest",
+    "test:e2e": "tsc -p . && node ./dist/tests/e2e/runTest.js",
+    "test:coverage": "c8 npm test",
     "test:encoding": "node scripts/test-save-prompt.js",
     "test:promptstore": "node scripts/test-prompt-store.js",
     "test:install": "node scripts/install-embedded-prompts.js --dest=./tmp-prompt-install",
@@ -473,12 +474,22 @@
     "package:vsix": "node scripts/package-vsix.js"
   },
   "devDependencies": {
+    "@types/glob": "^8.1.0",
+    "@types/jest": "^30.0.0",
+    "@types/mocha": "^10.0.10",
     "@types/node": "^20.8.0",
     "@types/vscode": "^1.95.0",
+    "@vscode/test-electron": "^2.5.2",
+    "c8": "^10.1.3",
+    "glob": "^13.0.0",
+    "jest": "^30.2.0",
+    "mocha": "^11.7.5",
+    "ts-jest": "^29.4.6",
     "typescript": "^5.3.0",
     "vsce": "^2.15.0"
   },
   "dependencies": {
-    "minimist": "^1.2.8"
+    "minimist": "^1.2.8",
+    "sql.js": "^1.12.0"
   }
 }

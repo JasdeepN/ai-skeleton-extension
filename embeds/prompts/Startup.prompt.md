@@ -89,107 +89,88 @@ description: Startup prompt for new chat sessions
 
 ### Phase 3: Memory Bank Initialization
 
-**Use `aiSkeleton_*` tools to create comprehensive initial memories:**
+**First, create the memory bank (SQLite database + markdown files), then populate it:**
 
-1. **Create productContext.md**
-   ```
-   aiSkeleton_updateProjectBrief {
-     "briefUpdate": "
-       # Project Brief
-       
-       ## Project Overview
-       [Comprehensive description from README and code analysis]
-       
-       ## Purpose & Goals
-       - [Primary purpose]
-       - [Key objectives]
-       - [Target users/audience]
-       
-       ## Core Features
-       - [Feature 1 with description]
-       - [Feature 2 with description]
-       ...
-       
-       ## Technical Stack
-       - **Language**: [Language + version]
-       - **Framework**: [Framework + version]
-       - **Key Libraries**: [List major dependencies]
-       - **Build Tools**: [Build toolchain]
-       - **Testing**: [Test framework]
-       - **Deployment**: [Deployment method]
-       
-       ## Project Structure
-       - [Key directories and their purposes]
-       
-       ## Development Workflow
-       - [Build command]
-       - [Test command]
-       - [Deploy process]
-       
-       ## Constraints & Requirements
-       - [Technical constraints]
-       - [Performance requirements]
-       - [Compatibility requirements]
-     "
-   }
-   ```
+#### Step 1: Create Memory Bank (Required First)
 
-2. **Create systemPatterns.md**
-   ```
-   aiSkeleton_updatePatterns {
-     "pattern": "Initial Architecture",
-     "context": "
-       # System Patterns
-       
-       ## Architectural Patterns
-       - [High-level architecture description]
-       - [Module organization approach]
-       - [Dependency management strategy]
-       
-       ## Design Patterns
-       - [Pattern 1: Description and usage]
-       - [Pattern 2: Description and usage]
-       
-       ## Code Conventions
-       - [Naming conventions]
-       - [File organization rules]
-       - [Import/export patterns]
-       - [Error handling patterns]
-       - [Testing patterns]
-       
-       ## Common Idioms
-       - [Project-specific patterns]
-       - [Utility usage patterns]
-       - [Configuration patterns]
-     "
-   }
-   ```
+If AI-Memory folder doesn't exist, create it via VS Code command:
+```
+Command Palette → "AI Skeleton: Create Memory Bank"
+```
+Or ask the user to run: `aiSkeleton.memory.create`
 
-3. **Set Initial Context**
-   ```
-   aiSkeleton_updateContext "Initial workspace setup complete. Ready for development work."
-   ```
+This initializes:
+- `AI-Memory/memory.db` - SQLite database for fast queries
+- `AI-Memory/*.md` files - Human-readable markdown (synced with database)
 
-4. **Initialize Progress Tracking**
-   ```
-   aiSkeleton_updateProgress "Setup complete: Memory bank initialized with project context and patterns"
-   ```
+**Wait for confirmation before proceeding.**
 
-5. **Log Initial Setup Decision**
-   ```
-   aiSkeleton_logDecision {
-     "decision": "Completed initial workspace analysis and memory setup",
-     "rationale": "Analyzed [X] files, documented [Y] patterns, mapped [Z] dependencies. Foundation established for productive work."
-   }
-   ```
+#### Step 2: Populate Project Brief
+
+Use `aiSkeleton_updateProjectBrief` to add project context to the database:
+```
+aiSkeleton_updateProjectBrief({
+  "content": "## Project Overview\n[Comprehensive description from README and code analysis]\n\n## Purpose & Goals\n- [Primary purpose]\n- [Key objectives]\n- [Target users/audience]\n\n## Core Features\n- [Feature 1 with description]\n- [Feature 2 with description]\n\n## Technical Stack\n- **Language**: [Language + version]\n- **Framework**: [Framework + version]\n- **Key Libraries**: [List major dependencies]\n- **Build Tools**: [Build toolchain]\n- **Testing**: [Test framework]\n\n## Project Structure\n- [Key directories and their purposes]\n\n## Constraints & Requirements\n- [Technical constraints]\n- [Performance requirements]"
+})
+```
+
+#### Step 3: Document System Patterns
+
+Use `aiSkeleton_updatePatterns` for each major pattern discovered:
+```
+aiSkeleton_updatePatterns({
+  "pattern": "Architecture Style",
+  "description": "[High-level architecture description - MVC, plugin-based, etc.]"
+})
+
+aiSkeleton_updatePatterns({
+  "pattern": "Code Organization",
+  "description": "[Module organization approach - feature-based, layer-based, etc.]"
+})
+
+aiSkeleton_updatePatterns({
+  "pattern": "Naming Conventions",
+  "description": "[File/folder naming conventions, variable naming, etc.]"
+})
+```
+
+#### Step 4: Set Initial Context
+
+```
+aiSkeleton_updateContext({
+  "context": "Initial workspace setup complete. Project analyzed and documented. Ready for development work."
+})
+```
+
+#### Step 5: Initialize Progress Tracking
+
+```
+aiSkeleton_updateProgress({
+  "item": "Initial workspace analysis and memory bank setup",
+  "status": "done"
+})
+```
+
+#### Step 6: Log Setup Decision
+
+```
+aiSkeleton_logDecision({
+  "decision": "Completed initial workspace analysis and memory setup",
+  "rationale": "Analyzed [X] files, documented [Y] patterns, mapped [Z] dependencies. SQLite database initialized for fast memory queries."
+})
+```
 
 ### Phase 4: Validation & Summary
 
-1. **Verify Memory Completeness**
-   - [ ] productContext.md contains comprehensive project overview
-   - [ ] systemPatterns.md documents all major patterns
-   - [ ] Technical stack fully documented
-   - [ ] Project structure mapped
+1. **Verify Memory Bank Active**
+   ```
+   aiSkeleton_showMemory
+   ```
+   Confirm:
+   - [ ] Memory bank status shows ACTIVE
+   - [ ] SQLite database initialized (memory.db exists)
+   - [ ] Project brief contains comprehensive overview
+   - [ ] System patterns documented
    - [ ] No critical gaps in understanding
 
 2. **Generate Setup Summary**
@@ -208,11 +189,12 @@ description: Startup prompt for new chat sessions
    - Dependencies cataloged: [Count]
    
    ### Memory Initialized
-   - ✓ productContext.md created
-   - ✓ systemPatterns.md created
-   - ✓ activeContext.md initialized
-   - ✓ progress.md initialized
-   - ✓ decisionLog.md initialized
+   - ✓ SQLite database created (memory.db)
+   - ✓ Project brief populated
+   - ✓ System patterns documented
+   - ✓ Active context initialized
+   - ✓ Progress tracking started
+   - ✓ Decision log initialized
    
    ### Ready For
    - Feature development
@@ -237,21 +219,22 @@ description: Startup prompt for new chat sessions
 
 ## New Task Checklist (Memory Exists, New Work)
 
-1. **Load Current State**
+1. **Load Current State from Database**
    ```
    aiSkeleton_showMemory
    ```
-   - Read productContext.md - understand project scope
-   - Read systemPatterns.md - understand architecture
-   - Read activeContext.md - check for ongoing work
+   The database query returns:
+   - Project brief - understand project scope
+   - System patterns - understand architecture  
+   - Active context - check for ongoing work
 
 2. **Clear Active Context**
    ```
-   aiSkeleton_updateContext "New task: [briefly describe if known]. Previous context cleared."
+   aiSkeleton_updateContext({ "context": "New task: [briefly describe if known]. Previous context cleared." })
    ```
 
 3. **Archive Previous Work (if any)**
-   - Move any in-progress research/plans to archive
+   - Mark completed items as done in progress
    - Clean up temporary files
    - Reset progress.md for new work
 
@@ -259,8 +242,8 @@ description: Startup prompt for new chat sessions
    ```
    [MEMORY BANK: ACTIVE]
    
-   Current project: [Project name from productContext]
-   Architecture: [Brief architecture summary]
+   Current project: [Project name from brief]
+   Architecture: [Brief architecture summary from patterns]
    Previous work: [Summary of last completed work]
    
    Ready for new instructions.
@@ -270,21 +253,21 @@ description: Startup prompt for new chat sessions
 
 ## Continuing Session Checklist (Resume Previous Work)
 
-1. **Load Complete Context**
+1. **Load Complete Context from Database**
    ```
    aiSkeleton_showMemory
    ```
-   - Read all memory files in order:
-     1. productContext.md
-     2. activeContext.md
-     3. systemPatterns.md
-     4. decisionLog.md
-     5. progress.md
+   The database returns all memory entries organized by type:
+   - Project brief (goals, scope, tech stack)
+   - Active context (current focus, blockers)
+   - System patterns (architecture, conventions)
+   - Decision log (recent technical decisions)
+   - Progress (done/doing/next tasks)
 
 2. **Analyze Current State**
-   - Identify in-progress tasks from progress.md
-   - Check for blockers in activeContext.md
-   - Review recent decisions from decisionLog.md
+   - Identify in-progress tasks from progress entries
+   - Check for blockers in context entries
+   - Review recent decisions from decision log
    - Understand current focus area
 
 3. **Report Session Context**

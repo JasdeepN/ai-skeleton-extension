@@ -1,13 +1,18 @@
-// AI-Memory Service - Core memory management functionality
-// Provides file operations for AI-Memory/*.md files with auto-detection and timestamps
+// AI-Memory Service - Core memory management with SQLite backend
+// Provides queryable memory operations with markdown fallback
 
 import * as vscode from 'vscode';
-import { getAllMemoryTemplates } from './memoryTemplateStore';
+import * as path from 'path';
+import { getMemoryStore, MemoryStore } from './memoryStore';
+import { migrateMarkdownToSQLite, isMigrationNeeded } from './memoryMigration';
+import { exportSQLiteToMarkdown, createBackupMarkdown } from './memoryExport';
 
 export interface MemoryBankState {
   active: boolean;
   path: vscode.Uri | null;
   activity?: 'idle' | 'read' | 'write';
+  dbPath?: string;
+  backend?: 'better-sqlite3' | 'sql.js' | 'none';
   files: {
     activeContext: boolean;
     decisionLog: boolean;
@@ -23,13 +28,12 @@ export interface MemoryEntry {
   content: string;
 }
 
-// Consolidated to 5 essential files (removed redundant architect.md and productContext.md)
 const MEMORY_FILES = [
-  'activeContext.md',   // Current session focus, blockers, state
-  'decisionLog.md',     // Historical decisions with rationale
-  'progress.md',        // Task tracking (Done/Doing/Next)
-  'systemPatterns.md',  // Architecture, patterns, conventions, tech stack
-  'projectBrief.md'     // Product overview, features, goals
+  'activeContext.md',
+  'decisionLog.md',
+  'progress.md',
+  'systemPatterns.md',
+  'projectBrief.md'
 ] as const;
 
 export type MemoryFileName = typeof MEMORY_FILES[number];
@@ -42,7 +46,6 @@ const FILE_KEY_MAP: Record<string, keyof MemoryBankState['files']> = {
   'projectBrief.md': 'projectBrief'
 };
 
-// Support both old 'memory-bank' and new 'AI-Memory' folder names
 const FOLDER_NAMES = ['AI-Memory', 'memory-bank'];
 
 export class MemoryBankService {
@@ -50,6 +53,7 @@ export class MemoryBankService {
     active: false,
     path: null,
     activity: 'idle',
+    backend: 'none',
     files: {
       activeContext: false,
       decisionLog: false,
@@ -59,8 +63,14 @@ export class MemoryBankService {
     }
   };
 
+  private _store: MemoryStore;
+  private _cache: Map<string, any[]> = new Map(); // In-memory cache for fast access
   private _onDidChangeState = new vscode.EventEmitter<MemoryBankState>();
   readonly onDidChangeState = this._onDidChangeState.event;
+
+  constructor() {
+    this._store = getMemoryStore();
+  }
 
   get state(): MemoryBankState {
     return this._state;
@@ -89,30 +99,53 @@ export class MemoryBankService {
   }
 
   /**
-   * Detect AI-Memory folder in the workspace and update state
-   * Supports both 'AI-Memory' (new) and 'memory-bank' (legacy) folder names
+   * Detect AI-Memory folder and initialize SQLite database
    */
   async detectMemoryBank(): Promise<MemoryBankState> {
     const ws = vscode.workspace.workspaceFolders;
     if (!ws || !ws.length) {
-      this._state = { 
-        active: false, 
-        path: null, 
+      this._state = {
+        active: false,
+        path: null,
         activity: 'idle',
-        files: { activeContext: false, decisionLog: false, systemPatterns: false, progress: false, projectBrief: false } 
+        backend: 'none',
+        files: { activeContext: false, decisionLog: false, systemPatterns: false, progress: false, projectBrief: false }
       };
       this._onDidChangeState.fire(this._state);
       return this._state;
     }
 
-    // Search for AI-Memory or memory-bank folder in workspace
     for (const folder of ws) {
       for (const folderName of FOLDER_NAMES) {
         const memoryPath = vscode.Uri.joinPath(folder.uri, folderName);
         try {
           const stat = await vscode.workspace.fs.stat(memoryPath);
           if (stat.type === vscode.FileType.Directory) {
-            // Found memory folder, check for required files
+            // Initialize SQLite database
+            const dbPath = path.join(memoryPath.fsPath, 'memory.db');
+            const initialized = await this._store.init(dbPath);
+
+            if (!initialized) {
+              console.error('[MemoryService] Failed to initialize database');
+              this._state = {
+                active: false,
+                path: memoryPath,
+                activity: 'idle',
+                backend: 'none',
+                files: { activeContext: false, decisionLog: false, systemPatterns: false, progress: false, projectBrief: false }
+              };
+              this._onDidChangeState.fire(this._state);
+              return this._state;
+            }
+
+            // Check if migration needed
+            if (await isMigrationNeeded(memoryPath, this._store)) {
+              console.log('[MemoryService] Running migration from markdown to SQLite');
+              const migrationResult = await migrateMarkdownToSQLite(memoryPath, this._store);
+              console.log('[MemoryService] Migration complete:', migrationResult);
+            }
+
+            // Verify core files exist or create them
             const filesState: MemoryBankState['files'] = {
               activeContext: false,
               decisionLog: false,
@@ -127,43 +160,44 @@ export class MemoryBankService {
                 const key = FILE_KEY_MAP[file];
                 if (key) filesState[key] = true;
               } catch {
-                // File doesn't exist
+                // File doesn't exist yet, may be created by export
               }
             }
 
-            // Memory bank is active if at least the core files exist
-            const coreFilesExist = filesState.activeContext && 
-                                    filesState.decisionLog && 
-                                    filesState.systemPatterns && 
-                                    filesState.progress;
+            const coreFilesExist = filesState.activeContext &&
+              filesState.decisionLog &&
+              filesState.systemPatterns &&
+              filesState.progress;
 
             this._state = {
               active: coreFilesExist,
               path: memoryPath,
+              dbPath,
               activity: 'idle',
+              backend: this._store.getBackend(),
               files: filesState
             };
             this._onDidChangeState.fire(this._state);
             return this._state;
           }
         } catch {
-          // folder doesn't exist, try next
+          // folder doesn't exist
         }
       }
     }
 
-    this._state = { 
-      active: false, 
-      path: null, 
+    this._state = {
+      active: false,
+      path: null,
       activity: 'idle',
-      files: { activeContext: false, decisionLog: false, systemPatterns: false, progress: false, projectBrief: false } 
+      backend: 'none',
+      files: { activeContext: false, decisionLog: false, systemPatterns: false, progress: false, projectBrief: false }
     };
     this._onDidChangeState.fire(this._state);
     return this._state;
   }
 
   private setActivity(activity: 'idle' | 'read' | 'write') {
-    // Only update when memory bank path known; otherwise treat as idle
     if (this._state) {
       this._state.activity = activity;
       this._onDidChangeState.fire(this._state);
@@ -171,7 +205,7 @@ export class MemoryBankService {
   }
 
   /**
-   * Create a new AI-Memory folder with initial files from embedded templates
+   * Create new AI-Memory folder with initial files
    */
   async createMemoryBank(folder?: vscode.WorkspaceFolder): Promise<boolean> {
     const ws = vscode.workspace.workspaceFolders;
@@ -186,14 +220,26 @@ export class MemoryBankService {
     try {
       await vscode.workspace.fs.createDirectory(memoryPath);
 
-      // Get embedded templates from memoryTemplateStore
-      const templates = getAllMemoryTemplates();
+      // Initialize database
+      const dbPath = path.join(memoryPath.fsPath, 'memory.db');
+      const initialized = await this._store.init(dbPath);
+      if (!initialized) {
+        throw new Error('Failed to initialize database');
+      }
 
-      for (const [filename, content] of Object.entries(templates)) {
+      // Create default memory files with initialized content
+      const today = this.getToday();
+      const defaultFiles: Record<string, string> = {
+        'projectBrief.md': `# Project Brief\n\n---\n\n[BRIEF:${today}] AI-Memory initialized\n`,
+        'activeContext.md': `# Active Context\n\n---\n\n[CONTEXT:${today}] AI-Memory initialized\n`,
+        'systemPatterns.md': `# System Patterns\n\n---\n\n[PATTERN:${today}] AI-Memory initialized\n`,
+        'decisionLog.md': `# Decision Log\n\n---\n\n[DECISION:${today}] AI-Memory initialized\n`,
+        'progress.md': `# Progress\n\n---\n\n[PROGRESS:${today}] AI-Memory initialized\n`,
+      };
+      
+      for (const [filename, content] of Object.entries(defaultFiles)) {
         const filePath = vscode.Uri.joinPath(memoryPath, filename);
-        // Add initialization timestamp to each file
-        const contentWithTimestamp = content.trimEnd() + `\n\n---\n\n${this.formatTag('CONTEXT')} AI-Memory initialized\n`;
-        await vscode.workspace.fs.writeFile(filePath, this.encode(contentWithTimestamp));
+        await vscode.workspace.fs.writeFile(filePath, this.encode(content));
       }
 
       await this.detectMemoryBank();
@@ -206,112 +252,179 @@ export class MemoryBankService {
   }
 
   /**
-   * Read a memory file's content
+   * Append entry to SQLite database
    */
-  async readFile(filename: MemoryFileName): Promise<string | null> {
-    if (!this._state.path) {
+  async logDecision(decision: string, rationale: string): Promise<boolean> {
+    if (!this._state.active) {
       await this.detectMemoryBank();
     }
-    if (!this._state.path) return null;
-
-    try {
-      const filePath = vscode.Uri.joinPath(this._state.path, filename);
-      const content = await vscode.workspace.fs.readFile(filePath);
-      this.setActivity('read');
-      return Buffer.from(content).toString('utf8');
-    } catch {
-      return null;
-    }
-  }
-
-  /**
-   * Append content to a memory file (never delete, only append)
-   */
-  async appendToFile(filename: MemoryFileName, content: string): Promise<boolean> {
-    if (!this._state.path) {
-      await this.detectMemoryBank();
-    }
-    if (!this._state.path) {
+    if (!this._state.active) {
       vscode.window.showErrorMessage('AI-Memory not found. Create one first.');
       return false;
     }
 
+    const tag = `DECISION:${this.getToday()}`;
+    const entry = `| ${this.getToday()} | ${decision} | ${rationale} |`;
+
     try {
-      const filePath = vscode.Uri.joinPath(this._state.path, filename);
-      const existing = await this.readFile(filename) || '';
-      const newContent = existing.trimEnd() + '\n\n' + content;
-      await vscode.workspace.fs.writeFile(filePath, this.encode(newContent));
+      await this._store.appendEntry({
+        file_type: 'DECISION',
+        timestamp: new Date().toISOString(),
+        tag,
+        content: entry
+      });
       this.setActivity('write');
+      this._cache.delete('DECISION');  // Invalidate cache
       return true;
     } catch (err) {
-      vscode.window.showErrorMessage(`Failed to update ${filename}: ${err}`);
+      vscode.window.showErrorMessage(`Failed to log decision: ${err}`);
       return false;
     }
-  }
-
-  /**
-   * Log a decision to decisionLog.md
-   */
-  async logDecision(decision: string, rationale: string): Promise<boolean> {
-    const tag = this.formatTag('DECISION');
-    const entry = `| ${this.getToday()} | ${decision} | ${rationale} |`;
-    return this.appendToFile('decisionLog.md', `${tag} ${entry}`);
   }
 
   /**
    * Update active context
    */
   async updateContext(context: string): Promise<boolean> {
-    const tag = this.formatTag('CONTEXT');
-    return this.appendToFile('activeContext.md', `${tag}\n${context}`);
+    if (!this._state.active) {
+      await this.detectMemoryBank();
+    }
+    if (!this._state.active) {
+      vscode.window.showErrorMessage('AI-Memory not found. Create one first.');
+      return false;
+    }
+
+    const tag = `CONTEXT:${this.getToday()}`;
+
+    try {
+      await this._store.appendEntry({
+        file_type: 'CONTEXT',
+        timestamp: new Date().toISOString(),
+        tag,
+        content: context
+      });
+      this.setActivity('write');
+      this._cache.delete('CONTEXT');
+      return true;
+    } catch (err) {
+      vscode.window.showErrorMessage(`Failed to update context: ${err}`);
+      return false;
+    }
   }
 
   /**
    * Update progress tracking
    */
   async updateProgress(item: string, status: 'done' | 'doing' | 'next'): Promise<boolean> {
-    const tag = this.formatTag('PROGRESS');
+    if (!this._state.active) {
+      await this.detectMemoryBank();
+    }
+    if (!this._state.active) {
+      vscode.window.showErrorMessage('AI-Memory not found. Create one first.');
+      return false;
+    }
+
+    const tag = `PROGRESS:${this.getToday()}`;
     const marker = status === 'done' ? '[x]' : '[ ]';
     const section = status.charAt(0).toUpperCase() + status.slice(1);
-    return this.appendToFile('progress.md', `${tag} ${section}: - ${marker} ${item}`);
+    const content = `${section}: - ${marker} ${item}`;
+
+    try {
+      await this._store.appendEntry({
+        file_type: 'PROGRESS',
+        timestamp: new Date().toISOString(),
+        tag,
+        content
+      });
+      this.setActivity('write');
+      this._cache.delete('PROGRESS');
+      return true;
+    } catch (err) {
+      vscode.window.showErrorMessage(`Failed to update progress: ${err}`);
+      return false;
+    }
   }
 
   /**
-   * Update system patterns (includes architecture)
+   * Update system patterns
    */
   async updateSystemPatterns(pattern: string, description: string): Promise<boolean> {
-    const tag = this.formatTag('PATTERN');
-    return this.appendToFile('systemPatterns.md', `${tag} ${pattern}: ${description}`);
+    if (!this._state.active) {
+      await this.detectMemoryBank();
+    }
+    if (!this._state.active) {
+      vscode.window.showErrorMessage('AI-Memory not found. Create one first.');
+      return false;
+    }
+
+    const tag = `PATTERN:${this.getToday()}`;
+    const content = `${pattern}: ${description}`;
+
+    try {
+      await this._store.appendEntry({
+        file_type: 'PATTERN',
+        timestamp: new Date().toISOString(),
+        tag,
+        content
+      });
+      this.setActivity('write');
+      this._cache.delete('PATTERN');
+      return true;
+    } catch (err) {
+      vscode.window.showErrorMessage(`Failed to update patterns: ${err}`);
+      return false;
+    }
   }
 
   /**
-   * Update project brief (includes product context)
+   * Update project brief
    */
   async updateProjectBrief(content: string): Promise<boolean> {
-    const tag = this.formatTag('BRIEF');
-    return this.appendToFile('projectBrief.md', `${tag}\n${content}`);
+    if (!this._state.active) {
+      await this.detectMemoryBank();
+    }
+    if (!this._state.active) {
+      vscode.window.showErrorMessage('AI-Memory not found. Create one first.');
+      return false;
+    }
+
+    const tag = `BRIEF:${this.getToday()}`;
+
+    try {
+      await this._store.appendEntry({
+        file_type: 'BRIEF',
+        timestamp: new Date().toISOString(),
+        tag,
+        content
+      });
+      this.setActivity('write');
+      this._cache.delete('BRIEF');
+      return true;
+    } catch (err) {
+      vscode.window.showErrorMessage(`Failed to update brief: ${err}`);
+      return false;
+    }
   }
 
   /**
-   * Mark a pattern or decision as deprecated (not deleted)
+   * Mark as deprecated
    */
   async markDeprecated(filename: MemoryFileName, item: string, reason: string): Promise<boolean> {
-    const tag = this.formatTag('DEPRECATED');
-    return this.appendToFile(filename, `${tag} ${item} - Reason: ${reason}`);
+    // Simplified - just log to decision log
+    return this.logDecision(`DEPRECATED: ${item}`, `Reason: ${reason}`);
   }
 
   /**
-   * Mark a decision as superseded
+   * Mark as superseded
    */
   async markSuperseded(originalDecision: string, newApproach: string): Promise<boolean> {
-    const tag = this.formatTag('SUPERSEDED');
-    return this.appendToFile('decisionLog.md', `${tag} ${originalDecision} → ${newApproach}`);
+    return this.logDecision(`SUPERSEDED: ${originalDecision}`, `New: ${newApproach}`);
   }
 
   /**
-   * Get full memory summary
+   * Get memory summary (optimized with cache)
    */
-  async showMemory(): Promise<string> {
+  async showMemory(maxLines: number = 50): Promise<string> {
     if (!this._state.active) {
       await this.detectMemoryBank();
     }
@@ -321,24 +434,34 @@ export class MemoryBankService {
     }
 
     this.setActivity('read');
-    const sections: string[] = [`[MEMORY BANK: ACTIVE]\nPath: ${this._state.path.fsPath}\n`];
 
-    // Read each file in recommended order
-    const fileOrder: MemoryFileName[] = [
-      'projectBrief.md',
-      'activeContext.md',
-      'systemPatterns.md',
-      'decisionLog.md',
-      'progress.md'
+    const types = ['BRIEF', 'CONTEXT', 'PATTERN', 'DECISION', 'PROGRESS'] as const;
+    const sections: string[] = [
+      `[MEMORY BANK: ACTIVE]`,
+      `Path: ${this._state.path.fsPath}`,
+      `Backend: ${this._state.backend}`,
+      ''
     ];
 
-    for (const filename of fileOrder) {
-      const content = await this.readFile(filename);
-      if (content) {
-        // Get last 50 lines or less for summary
-        const lines = content.split('\n');
-        const summary = lines.slice(-50).join('\n');
-        sections.push(`## ${filename}\n\n${summary}\n`);
+    for (const type of types) {
+      // Check cache first
+      let entries = this._cache.get(type);
+      if (!entries) {
+        const result = await this._store.queryByType(type as any, 50);
+        entries = result.entries;
+        this._cache.set(type, entries);
+      }
+
+      if (entries && entries.length > 0) {
+        const typeName = type === 'BRIEF' ? 'projectBrief.md' :
+          type === 'CONTEXT' ? 'activeContext.md' :
+            type === 'PATTERN' ? 'systemPatterns.md' :
+              type === 'DECISION' ? 'decisionLog.md' : 'progress.md';
+
+        sections.push(`## ${typeName}\n`);
+        const lines = entries.map((e: any) => `[${e.tag}] ${e.content}`).slice(0, maxLines);
+        sections.push(lines.join('\n\n'));
+        sections.push('');
       }
     }
 
@@ -346,11 +469,40 @@ export class MemoryBankService {
   }
 
   /**
-   * Get the URI for a specific memory file
+   * Get URI for memory file (for opening in editor)
    */
   getMemoryFileUri(filename: MemoryFileName): vscode.Uri | null {
     if (!this._state.path) return null;
     return vscode.Uri.joinPath(this._state.path, filename);
+  }
+
+  /**
+   * Export to markdown for backup
+   */
+  async exportToMarkdown(): Promise<boolean> {
+    if (!this._state.active || !this._state.path) return false;
+
+    try {
+      const result = await exportSQLiteToMarkdown(this._state.path, this._store);
+      return result.success;
+    } catch (err) {
+      console.error('[MemoryService] Export failed:', err);
+      return false;
+    }
+  }
+
+  /**
+   * Create backup on deactivate
+   */
+  async createBackup(): Promise<boolean> {
+    if (!this._state.active || !this._state.path) return false;
+
+    try {
+      return await createBackupMarkdown(this._state.path, this._store);
+    } catch (err) {
+      console.error('[MemoryService] Backup failed:', err);
+      return false;
+    }
   }
 }
 

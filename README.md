@@ -1,5 +1,8 @@
 # AI Skeleton Prompts & Memory
 
+[![CI Tests](https://github.com/JasdeepN/ai-skeleton-extension/actions/workflows/test.yml/badge.svg)](https://github.com/JasdeepN/ai-skeleton-extension/actions/workflows/test.yml)
+[![codecov](https://codecov.io/gh/JasdeepN/ai-skeleton-extension/branch/main/graph/badge.svg)](https://codecov.io/gh/JasdeepN/ai-skeleton-extension)
+
 **Complete AI agent toolkit for VS Code**: Native memory management, workflow prompts, MCP integration, and agent definitions.
 
 ## 🎯 Purpose

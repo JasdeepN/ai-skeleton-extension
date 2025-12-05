@@ -42,15 +42,20 @@ From the codebase, identify:
 
 ## Phase 2: Memory Analysis
 
-### Step 2.1 - Read All Memory Files
+### Step 2.1 - Read All Memory from Database
 
-Read each file in `AI-Memory/`:
+Query the memory database to get current state:
 
-1. `activeContext.md` - Current focus and blockers
-2. `decisionLog.md` - Historical decisions
-3. `progress.md` - Task tracking
-4. `systemPatterns.md` - Architecture and patterns
-5. `projectBrief.md` - Product overview and goals
+```
+aiSkeleton_showMemory
+```
+
+This returns all memory entries organized by type:
+- **projectBrief** - Product overview and goals
+- **activeContext** - Current focus and blockers  
+- **systemPatterns** - Architecture and patterns
+- **decisionLog** - Historical decisions
+- **progress** - Task tracking (done/doing/next)
 
 ### Step 2.2 - Identify Discrepancies
 
@@ -67,63 +72,78 @@ For each memory file, check:
 
 ## Phase 3: Synchronization
 
-### Step 3.1 - Update `systemPatterns.md`
+Use `aiSkeleton_*` tools to update the database. All updates are automatically persisted to both SQLite and markdown files.
 
-```markdown
-## Updates to Apply:
+### Step 3.1 - Update System Patterns
 
+```
+aiSkeleton_updatePatterns({
+  "pattern": "[Pattern Name]",
+  "description": "[Updated description]"
+})
+```
+
+Apply these updates:
 1. ADD new patterns discovered in codebase
-2. REMOVE patterns no longer in use (mark as deprecated, don't delete history)
+2. Mark deprecated patterns using `aiSkeleton_markDeprecated`
 3. UPDATE patterns that have evolved
 4. VERIFY technical stack matches actual dependencies
 
-Format for deprecated patterns:
-[DEPRECATED:YYYY-MM-DD] Old pattern - Reason: replaced by X
+### Step 3.2 - Update Project Brief
+
+```
+aiSkeleton_updateProjectBrief({
+  "content": "[Updated project information]"
+})
 ```
 
-### Step 3.2 - Update `projectBrief.md`
-
-```markdown
-## Updates to Apply:
-
+Apply these updates:
 1. Refresh product description if scope changed
-2. Update feature list (add new, mark completed, remove abandoned)
-3. Sync technical stack with actual package.json/dependencies
+2. Update feature list (add new, mark completed)
+3. Sync technical stack with actual dependencies
 4. Update user/audience if it has evolved
+
+### Step 3.3 - Update Active Context
+
+```
+aiSkeleton_updateContext({
+  "context": "[Current focus and state]"
+})
 ```
 
-### Step 3.3 - Update `activeContext.md`
-
-```markdown
-## Updates to Apply:
-
-1. Clear stale context entries (older than 7-14 days)
+Apply these updates:
+1. Clear stale context (entries older than 7-14 days)
 2. Update current goals to match actual focus
 3. Refresh blockers list
 4. Add context for current work
+
+### Step 3.4 - Update Progress
+
+```
+aiSkeleton_updateProgress({
+  "item": "[Task description]",
+  "status": "done" | "doing" | "next"
+})
 ```
 
-### Step 3.4 - Update `progress.md`
-
-```markdown
-## Updates to Apply:
-
+Apply these updates:
 1. Move completed items to Done (verify against commits)
 2. Update Doing to reflect actual current work
 3. Refresh Next with upcoming priorities
-4. Archive old completed items if list is too long
+
+### Step 3.5 - Update Decision Log
+
+```
+aiSkeleton_logDecision({
+  "decision": "[Decision made]",
+  "rationale": "[Why this was decided]"
+})
 ```
 
-### Step 3.5 - Update `decisionLog.md`
-
-```markdown
-## Updates to Apply:
-
+Apply these updates:
 1. Add any decisions made but not logged
-2. Mark superseded decisions:
-   [SUPERSEDED:YYYY-MM-DD] Original decision → New approach
+2. Mark superseded decisions with `aiSkeleton_markDeprecated`
 3. Keep all history (append-only) but annotate changes
-```
 
 ---
 
@@ -131,22 +151,27 @@ Format for deprecated patterns:
 
 ### Step 4.1 - Cross-Reference Check
 
-Verify consistency across files:
+Query the database to verify consistency:
 
-- [ ] Tech stack in `projectBrief.md` matches `systemPatterns.md`
-- [ ] Current goals in `activeContext.md` align with `progress.md` Doing section
-- [ ] Recent decisions in `decisionLog.md` reflected in `systemPatterns.md`
-- [ ] No contradictions between files
+```
+aiSkeleton_showMemory
+```
+
+Check:
+- [ ] Tech stack in project brief matches system patterns
+- [ ] Current goals in context align with progress "doing" entries
+- [ ] Recent decisions reflected in system patterns
+- [ ] No contradictions between memory types
 
 ### Step 4.2 - Freshness Tags
 
-Ensure all entries have proper timestamps:
+All database entries are automatically timestamped. Verify entries have proper tags:
 
 ```
 [TYPE:YYYY-MM-DD] Content here
 ```
 
-Types: `CONTEXT`, `DECISION`, `PROGRESS`, `PATTERN`, `DEPRECATED`, `SUPERSEDED`
+Types: `CONTEXT`, `DECISION`, `PROGRESS`, `PATTERN`, `BRIEF`, `DEPRECATED`, `SUPERSEDED`
 
 ---
 
@@ -157,12 +182,16 @@ Generate a sync summary:
 ```markdown
 ## Memory Sync Complete - [DATE]
 
+### Database Status
+- Backend: [sql.js | better-sqlite3]
+- Entries updated: [count]
+
 ### Changes Made:
-- systemPatterns.md: [X additions, Y updates, Z deprecations]
-- projectBrief.md: [Summary of changes]
-- activeContext.md: [Cleared N stale entries, added M new]
-- progress.md: [Moved X to Done, updated Doing]
-- decisionLog.md: [Added N new decisions, marked M superseded]
+- System Patterns: [X additions, Y updates, Z deprecations]
+- Project Brief: [Summary of changes]
+- Active Context: [Cleared N stale entries, added M new]
+- Progress: [Moved X to Done, updated Doing]
+- Decision Log: [Added N new decisions, marked M superseded]
 
 ### Discrepancies Found:
 - [List any issues that need human attention]
