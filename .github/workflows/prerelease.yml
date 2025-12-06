@@ -40,56 +40,12 @@ jobs:
         run: |
           VERSION=$(jq -r '.version' package.json)
           echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "📦 Current version: $VERSION"
-
-      - name: Check if version needs bump
-        id: version-check
-        run: |
-          CURRENT_VERSION=${{ steps.current-version.outputs.version }}
-          
-          # Get the last pre-release version
-          LAST_PRERELEASE=""
-          if git rev-parse latest-prerelease >/dev/null 2>&1; then
-            LAST_PRERELEASE=$(git show latest-prerelease:package.json 2>/dev/null | jq -r '.version' || echo "")
-          fi
-          
-          if [ -n "$LAST_PRERELEASE" ] && [ "$CURRENT_VERSION" != "$LAST_PRERELEASE" ]; then
-            echo "version_changed=true" >> $GITHUB_OUTPUT
-            echo "✅ Version changed: $LAST_PRERELEASE → $CURRENT_VERSION"
-          else
-            echo "version_changed=false" >> $GITHUB_OUTPUT
-            echo "ℹ️ Version unchanged, will bump"
-          fi
-
-      - name: Bump version for pre-release
-        id: bump
-        if: steps.version-check.outputs.version_changed == 'false'
-        run: |
-          git config user.name "Pre-Release Bot"
-          git config user.email "prerelease@bot.local"
-          
-          # Bump prerelease version
-          npm version prerelease --preid=pre --no-git-tag-version
-          NEW_VERSION=$(jq -r '.version' package.json)
-          
-          git add package.json package-lock.json
-          git commit -m "chore: bump version to $NEW_VERSION [skip ci]"
-          git push origin staging
-          
-          echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
-          echo "✅ Bumped to pre-release version $NEW_VERSION"
-
-      - name: Get final version
-        id: final-version
-        run: |
-          VERSION=$(jq -r '.version' package.json)
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "📦 Pre-release version: $VERSION"
 
       - name: Check for existing tag
         id: tag-check
         run: |
-          VERSION=${{ steps.final-version.outputs.version }}
+          VERSION=${{ steps.current-version.outputs.version }}
           git fetch --tags --prune --prune-tags
           
           if git rev-parse "refs/tags/v${VERSION}-pre" >/dev/null 2>&1; then
@@ -106,12 +62,12 @@ jobs:
       - name: Package VSIX
         run: |
           mkdir -p vsix
-          npx @vscode/vsce package --out vsix/ai-skeleton-extension-${{ steps.final-version.outputs.version }}.vsix
+          npx @vscode/vsce package --out vsix/ai-skeleton-extension-${{ steps.current-version.outputs.version }}.vsix
 
       - name: Create pre-release tag
         if: steps.tag-check.outputs.exists == 'false'
         run: |
-          VERSION=${{ steps.final-version.outputs.version }}
+          VERSION=${{ steps.current-version.outputs.version }}
           git tag -a "v${VERSION}-pre" -m "Pre-release v${VERSION}"
           git push origin "v${VERSION}-pre"
           
@@ -126,7 +82,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          VERSION=${{ steps.final-version.outputs.version }}
+          VERSION=${{ steps.current-version.outputs.version }}
           VSIX_FILE="vsix/ai-skeleton-extension-${VERSION}.vsix"
           
           # Create pre-release on GitHub
