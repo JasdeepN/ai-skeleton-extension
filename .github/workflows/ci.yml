@@ -272,14 +272,33 @@ jobs:
             if git diff-index --quiet HEAD --; then
               echo "No changes to merge"
               echo "merged=false" >> $GITHUB_OUTPUT
+              echo "needs_manual=false" >> $GITHUB_OUTPUT
               exit 0
             fi
             git commit -m "chore: merge dev → staging [$(date +'%Y-%m-%d')]"
           fi
-                    
-          git push origin staging
-          echo "merged=true" >> $GITHUB_OUTPUT
-          echo "✅ Successfully merged dev to staging"
+          
+          # Try to push, handle branch protection gracefully
+          if git push origin staging 2>&1 | tee push_output.log; then
+            echo "merged=true" >> $GITHUB_OUTPUT
+            echo "needs_manual=false" >> $GITHUB_OUTPUT
+            echo "✅ Successfully merged dev to staging"
+          else
+            # Check if failure was due to branch protection
+            if grep -q "protected branch" push_output.log || grep -q "Required status check" push_output.log; then
+              echo "merged=false" >> $GITHUB_OUTPUT
+              echo "needs_manual=true" >> $GITHUB_OUTPUT
+              echo "⚠️ Branch protection prevented auto-merge. Manual merge required."
+              echo "::warning::Auto-merge blocked by branch protection. Please merge dev to staging manually."
+              exit 0  # Exit successfully, not a real failure
+            else
+              echo "merged=false" >> $GITHUB_OUTPUT
+              echo "needs_manual=true" >> $GITHUB_OUTPUT
+              echo "::error::Push failed for unknown reason"
+              cat push_output.log
+              exit 1  # Real failure
+            fi
+          fi
 
       - name: Staging Sanity Check - Verify Embeddings
         if: steps.merge.outputs.merged == 'true'
@@ -335,8 +354,18 @@ jobs:
             ## Pre-release v${{ steps.version.outputs.version }}-pre
             Auto-published from staging merge.
 
-      - name: Comment on merge failure
-        if: failure()
+      - name: Manual merge notification
+        if: steps.merge.outputs.needs_manual == 'true'
         run: |
-          echo "::warning::Auto-merge failed. Manual merge required."
-          echo "Review the workflow run and resolve conflicts manually."
+          echo "## ⚠️ Manual Merge Required" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Auto-merge to staging was blocked by branch protection." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Next Steps:" >> $GITHUB_STEP_SUMMARY
+          echo '```bash' >> $GITHUB_STEP_SUMMARY
+          echo "git checkout staging" >> $GITHUB_STEP_SUMMARY
+          echo "git merge dev" >> $GITHUB_STEP_SUMMARY
+          echo "git push" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "The Branch Guard workflow will validate the merge." >> $GITHUB_STEP_SUMMARY
