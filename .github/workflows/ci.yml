@@ -144,55 +144,6 @@ jobs:
           category: "/language:javascript"
 
   # ============================================
-  # Staging Quick Check (lightweight validation)
-  # Runs on every push to staging (including auto-merge from dev)
-  # ============================================
-  staging-sanity-check:
-    name: Staging Sanity Check
-    if: github.ref == 'refs/heads/staging'
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: 'npm'
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Verify embeddings are current
-        shell: bash
-        run: |
-          echo "Running embedding scripts to ensure latest content..."
-          npm run embed-all
-          
-          # Check if embeddings changed
-          if git diff --quiet; then
-            echo "✅ Embeddings are up-to-date"
-          else
-            echo "::error::Embeddings are out-of-date! Run 'npm run embed-all' locally before pushing."
-            echo "Modified files:"
-            git diff --name-only
-            exit 1
-          fi
-
-      - name: TypeScript Compilation Check
-        shell: bash
-        run: |
-          if ! npx tsc --noEmit; then
-            echo "::error::TypeScript compilation failed"
-            exit 1
-          fi
-          echo "✅ TypeScript compilation successful"
-
-      - name: Quick unit tests (smoke test)
-        run: npm test -- --testPathIgnorePatterns="e2e" --maxWorkers=2
-
-  # ============================================
   # Stage 2: Smoke Test VSIX (after build passes on dev)
   # ============================================
   smoke-test:
@@ -303,6 +254,37 @@ jobs:
           git tag -a "$PRERELEASE_TAG" -m "Pre-release: $PRERELEASE_TAG"
           git push origin "$PRERELEASE_TAG"
           echo "✅ Tagged pre-release: $PRERELEASE_TAG"
+
+      - name: Staging Sanity Check - Verify Embeddings
+        if: steps.merge.outputs.merged == 'true'
+        shell: bash
+        run: |
+          echo "Running sanity check on merged staging code..."
+          npm run embed-all
+          
+          # Check if embeddings changed
+          if git diff --quiet; then
+            echo "✅ Embeddings are up-to-date on staging"
+          else
+            echo "::error::Embeddings are out-of-date on staging! This should not happen."
+            echo "Modified files:"
+            git diff --name-only
+            exit 1
+          fi
+
+      - name: Staging Sanity Check - TypeScript
+        if: steps.merge.outputs.merged == 'true'
+        shell: bash
+        run: |
+          if ! npx tsc --noEmit; then
+            echo "::error::TypeScript compilation failed on staging"
+            exit 1
+          fi
+          echo "✅ TypeScript compilation successful on staging"
+
+      - name: Staging Sanity Check - Unit Tests
+        if: steps.merge.outputs.merged == 'true'
+        run: npm test -- --testPathIgnorePatterns="e2e" --maxWorkers=2
 
       - name: Upload VSIX as pre-release artifact
         if: steps.merge.outputs.merged == 'true'
