@@ -43,6 +43,21 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Verify embeddings are current
+        run: |
+          echo "Running embedding scripts to ensure latest content..."
+          npm run embed-all
+          
+          # Check if embeddings changed
+          if git diff --quiet; then
+            echo "✅ Embeddings are up-to-date"
+          else
+            echo "::error::Embeddings are out-of-date! Run 'npm run embed-all' locally before pushing."
+            echo "Modified files:"
+            git diff --name-only
+            exit 1
+          fi
+
       - name: TypeScript Compilation Check
         shell: bash
         run: |
