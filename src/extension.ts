@@ -3,13 +3,16 @@ import { getPrompts, Prompt } from './promptStore';
 import { getAgents, AgentTemplate, getProtectedFilesEmbedded } from './agentStore';
 import { PromptTreeProvider } from './treeProvider';
 import { getMemoryService } from './memoryService';
+import { getMemoryStore } from './memoryStore';
 import { registerMemoryTools } from './memoryTools';
 import { registerMemoryTreeView } from './memoryTreeProvider';
+// import { registerMemoryDashboardView } from './memoryDashboardProvider'; // TODO: Re-enable after adding missing methods
 import { registerMCPTreeView } from './mcpTreeProvider';
 import { getMCPConfigString, getMCPServerList } from './mcpStore';
 import { registerDiagnosticsView } from './diagnosticsProvider';
 import { maybeAutoStartMCPs, startMCPServers } from './mcpManager';
 import { showSetupDialog, checkForUpdates, reinstallAll } from './setupService';
+import { TokenCounterService } from './tokenCounterService';
 
 async function resolvePrompts(): Promise<Prompt[]> {
   const source = vscode.workspace.getConfiguration().get<'auto'|'embedded'|'workspace'>('aiSkeleton.prompts.source', 'auto');
@@ -62,6 +65,63 @@ export async function activate(context: vscode.ExtensionContext) {
   // Re-detect memory after potential setup
   await memoryService.detectMemoryBank();
 
+  // Initialize token counter service with LRU cache
+  const tokenCounterService = TokenCounterService.getInstance();
+  try {
+    // Wire memoryStore to token counter for metrics persistence
+    const memoryStore = getMemoryStore();
+    tokenCounterService.setMemoryStore(memoryStore);
+    console.log('[Extension] TokenCounterService initialized with metrics persistence');
+  } catch (err) {
+    console.warn('[Extension] TokenCounterService initialization warning:', err);
+  }
+
+  // Agent call middleware for token tracking
+  const agentCallMiddleware = async (agentId: string, systemPrompt: string, messages: Array<{ role: 'user' | 'assistant'; content: string }>, modelName: string = 'claude-3-5-sonnet') => {
+    try {
+      // Count tokens for the agent call
+      const tokenResult = await tokenCounterService.countTokens({
+        model: modelName,
+        systemPrompt,
+        messages
+      });
+
+      // Calculate context budget
+      const contextBudget = tokenCounterService.getContextBudget(tokenResult.totalTokens);
+
+      // Log token metric to memoryStore
+      const memoryStore = getMemoryStore();
+      await memoryStore.logTokenMetric({
+        timestamp: new Date().toISOString(),
+        model: modelName,
+        input_tokens: tokenResult.inputTokens,
+        output_tokens: tokenResult.outputTokens,
+        total_tokens: tokenResult.totalTokens,
+        context_status: contextBudget.status
+      });
+
+      console.log(`[AgentCallMiddleware] Agent: ${agentId}, Status: ${contextBudget.status}, Remaining: ${contextBudget.remaining}K tokens`);
+
+      return {
+        totalTokens: tokenResult.totalTokens,
+        budget: contextBudget,
+        cached: tokenResult.cached
+      };
+    } catch (err) {
+      console.error('[AgentCallMiddleware] Error tracking agent call:', err);
+      // Return a default safe budget on error
+      return {
+        totalTokens: 0,
+        budget: tokenCounterService.getContextBudget(0),
+        cached: false
+      };
+    }
+  };
+
+  // Store middleware globally so memoryTools can access it for tool invocations
+  // This allows tools to track token usage when invoked by agents
+  (global as any).__agentCallMiddleware = agentCallMiddleware;
+
   // Register memory LM tools (for Copilot agent integration)
   // Uses VS Code Language Model Tools API (stable in VS Code 1.95+)
   // Commands below provide manual/programmatic alternatives
@@ -69,6 +129,9 @@ export async function activate(context: vscode.ExtensionContext) {
 
   // Register memory tree view
   const { treeView: memoryTreeView, provider: memoryTreeProvider } = registerMemoryTreeView(context);
+
+  // TODO: Register memory dashboard (Activity Bar) - needs getDashboardMetrics in memoryService
+  // const { treeView: memoryDashboardView, provider: memoryDashboardProvider } = registerMemoryDashboardView(context);
 
   // Register MCP tree view
   const { treeView: mcpTreeView, provider: mcpTreeProvider } = registerMCPTreeView(context);
@@ -107,6 +170,32 @@ export async function activate(context: vscode.ExtensionContext) {
   updateMemoryStatus();
   memoryStatusBar.show();
   context.subscriptions.push(memoryStatusBar);
+
+    // Context budget status bar - displays token usage and remaining budget
+  const contextBudgetStatusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 8);
+  contextBudgetStatusBar.command = 'aiSkeleton.memory.showStatus';
+  const updateContextBudget = () => {
+    const metrics = tokenCounterService.getMetrics();
+    const cacheStats = tokenCounterService.getCacheStats();
+    
+    if (metrics.buffered === 0 && cacheStats.size === 0) {
+      contextBudgetStatusBar.text = '$(pie-chart) Budget: Ready';
+      contextBudgetStatusBar.tooltip = 'No agent calls yet. Budget: 200K tokens';
+      contextBudgetStatusBar.backgroundColor = undefined;
+    } else {
+      // Show cache stats as a proxy for usage
+      contextBudgetStatusBar.text = `$(pie-chart) Cache: ${cacheStats.size}`;
+      contextBudgetStatusBar.tooltip = `Token Cache: ${cacheStats.size} entries\\nBuffered metrics: ${metrics.buffered}`;
+      contextBudgetStatusBar.backgroundColor = undefined;
+    }
+  };
+  updateContextBudget();
+  contextBudgetStatusBar.show();
+  context.subscriptions.push(contextBudgetStatusBar);
+
+  // Update budget status bar periodically
+  const budgetUpdateInterval = setInterval(updateContextBudget, 5000);
+  context.subscriptions.push({ dispose: () => clearInterval(budgetUpdateInterval) });
 
   // Listen for memory state changes
   memoryService.onDidChangeState(() => {

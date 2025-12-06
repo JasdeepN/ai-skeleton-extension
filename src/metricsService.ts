@@ -45,10 +45,10 @@ class MetricsServiceImpl {
   /**
    * Get token metrics for the last N days
    */
-  async getTokenMetrics(days: number = 7): Promise<TokenMetric[]> {
+  async queryTokenMetrics(days: number = 7): Promise<TokenMetric[]> {
     try {
       const store = getMemoryStore();
-      const metrics = await store.getTokenMetrics(days);
+      const metrics = await store.queryTokenMetrics(days);
       return metrics;
     } catch (err) {
       console.error('[MetricsService] Failed to get token metrics:', err);
@@ -69,7 +69,7 @@ class MetricsServiceImpl {
     }
 
     try {
-      const metrics = await this.getTokenMetrics(days);
+      const metrics = await this.queryTokenMetrics(days);
       if (metrics.length === 0) return 0;
       
       const total = metrics.reduce((sum, m) => sum + (m.total_tokens || 0), 0);
@@ -88,7 +88,7 @@ class MetricsServiceImpl {
    */
   async getTokenTrend(days: number = 7): Promise<'increasing' | 'stable' | 'decreasing'> {
     try {
-      const metrics = await this.getTokenMetrics(days);
+      const metrics = await this.queryTokenMetrics(days);
       if (metrics.length < 2) return 'stable';
 
       // Compare first half vs second half average
@@ -217,7 +217,7 @@ class MetricsServiceImpl {
     }
 
     try {
-      const metrics = await this.getTokenMetrics(days);
+      const metrics = await this.queryTokenMetrics(days);
       if (metrics.length === 0) return 0;
       
       // Estimate cache hit rate based on cached flag (simplified: 50% when cached)
@@ -237,7 +237,7 @@ class MetricsServiceImpl {
   async getDashboardMetrics(): Promise<MetricsSummary> {
     try {
       const latestMetric = await this.getLatestTokenMetric();
-      const tokenMetrics = await this.getTokenMetrics(7);
+      const tokenMetrics = await this.queryTokenMetrics(7);
       
       if (!latestMetric && tokenMetrics.length === 0) {
         return {

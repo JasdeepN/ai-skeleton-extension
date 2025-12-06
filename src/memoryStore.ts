@@ -14,6 +14,17 @@ export interface MemoryEntry {
   content: string;
 }
 
+export interface TokenMetric {
+  id?: number;
+  timestamp: string; // ISO 8601
+  model: string; // e.g., "claude-3-5-sonnet"
+  input_tokens: number;
+  output_tokens: number;
+  total_tokens: number;
+  context_status?: string; // "healthy" | "warning" | "critical"
+  created_at?: string;
+}
+
 // Mapping from uppercase tags to filenames
 export const FILE_TYPE_TO_FILENAME: Record<MemoryEntry['file_type'], string> = {
   CONTEXT: 'activeContext.md',
@@ -225,6 +236,20 @@ export class MemoryStore {
           
           CREATE INDEX IF NOT EXISTS idx_tag 
             ON entries(tag);
+
+          CREATE TABLE IF NOT EXISTS token_metrics (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp TEXT NOT NULL,
+            model TEXT NOT NULL,
+            input_tokens INTEGER NOT NULL,
+            output_tokens INTEGER NOT NULL,
+            total_tokens INTEGER NOT NULL,
+            context_status TEXT,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+          );
+
+          CREATE INDEX IF NOT EXISTS idx_token_timestamp 
+            ON token_metrics(timestamp DESC);
         `);
       } else if (this.backend === 'sql.js') {
         // sql.js uses run() for each statement
@@ -239,7 +264,19 @@ export class MemoryStore {
           `CREATE INDEX IF NOT EXISTS idx_file_timestamp 
             ON entries(file_type, timestamp DESC)`,
           `CREATE INDEX IF NOT EXISTS idx_tag 
-            ON entries(tag)`
+            ON entries(tag)`,
+          `CREATE TABLE IF NOT EXISTS token_metrics (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp TEXT NOT NULL,
+            model TEXT NOT NULL,
+            input_tokens INTEGER NOT NULL,
+            output_tokens INTEGER NOT NULL,
+            total_tokens INTEGER NOT NULL,
+            context_status TEXT,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+          )`,
+          `CREATE INDEX IF NOT EXISTS idx_token_timestamp 
+            ON token_metrics(timestamp DESC)`
         ];
         
         for (const stmt of statements) {
@@ -492,6 +529,78 @@ export class MemoryStore {
    */
   isReady(): boolean {
     return this.isInitialized;
+  }
+
+  /**
+   * Log token metric to database
+   */
+  async logTokenMetric(metric: Omit<TokenMetric, 'id' | 'created_at'>): Promise<number | null> {
+    if (!this.db || !this.isInitialized) return null;
+
+    try {
+      if (this.backend === 'better-sqlite3') {
+        const stmt = this.db.prepare(`
+          INSERT INTO token_metrics (timestamp, model, input_tokens, output_tokens, total_tokens, context_status)
+          VALUES (?, ?, ?, ?, ?, ?)
+        `);
+        const result = stmt.run(
+          metric.timestamp,
+          metric.model,
+          metric.input_tokens,
+          metric.output_tokens,
+          metric.total_tokens,
+          metric.context_status || null
+        );
+        return result.lastInsertRowid as number;
+      } else if (this.backend === 'sql.js') {
+        this.db.run(
+          `INSERT INTO token_metrics (timestamp, model, input_tokens, output_tokens, total_tokens, context_status)
+           VALUES (?, ?, ?, ?, ?, ?)`,
+          [metric.timestamp, metric.model, metric.input_tokens, metric.output_tokens, metric.total_tokens, metric.context_status || null]
+        );
+        this.persistSqlJs();
+        return Math.floor(Date.now() / 1000);
+      }
+    } catch (err) {
+      console.error('[MemoryStore] logTokenMetric failed:', err);
+    }
+    return null;
+  }
+
+  /**
+   * Query token metrics
+   */
+  async queryTokenMetrics(limit: number = 100): Promise<TokenMetric[]> {
+    if (!this.db || !this.isInitialized) return [];
+
+    try {
+      if (this.backend === 'better-sqlite3') {
+        const stmt = this.db.prepare(`
+          SELECT id, timestamp, model, input_tokens, output_tokens, total_tokens, context_status, created_at
+          FROM token_metrics
+          ORDER BY timestamp DESC
+          LIMIT ?
+        `);
+        return stmt.all(limit) as TokenMetric[];
+      } else if (this.backend === 'sql.js') {
+        const stmt = this.db.prepare(`
+          SELECT id, timestamp, model, input_tokens, output_tokens, total_tokens, context_status, created_at
+          FROM token_metrics
+          ORDER BY timestamp DESC
+          LIMIT ?
+        `);
+        stmt.bind([limit]);
+        const metrics: TokenMetric[] = [];
+        while (stmt.step()) {
+          metrics.push(stmt.getAsObject() as TokenMetric);
+        }
+        stmt.free();
+        return metrics;
+      }
+    } catch (err) {
+      console.error('[MemoryStore] queryTokenMetrics failed:', err);
+    }
+    return [];
   }
 }
 
