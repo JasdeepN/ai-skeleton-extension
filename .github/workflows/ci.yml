@@ -2,9 +2,9 @@ name: CI Pipeline
 
 on:
   push:
-    branches: [dev, staging]
+    branches: [dev]
   pull_request:
-    branches: [dev, staging, release]
+    branches: [dev]
   workflow_dispatch:
 
 permissions:
@@ -60,7 +60,7 @@ jobs:
   build-and-test:
     name: Build & Test (${{ matrix.os }}, Node ${{ matrix.node }})
     needs: changes
-    if: needs.changes.outputs.code == 'true' && (github.ref != 'refs/heads/staging' || github.event_name == 'pull_request')
+    if: needs.changes.outputs.code == 'true'
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -266,23 +266,74 @@ jobs:
           
           # Try fast-forward merge first, fall back to squash
           if git merge --ff-only origin/dev 2>/dev/null; then
+            echo "merge_attempted=true" >> $GITHUB_OUTPUT
             echo "✅ Fast-forward merge successful"
           else
-            git merge --squash origin/dev
-            if git diff-index --quiet HEAD --; then
-              echo "No changes to merge"
+            # Try squash merge
+            set +e  # Don't exit on error
+            git merge --squash origin/dev 2>&1 | tee merge_output.log
+            MERGE_EXIT=$?
+            set -e
+            
+            if [ $MERGE_EXIT -eq 0 ]; then
+              # Merge succeeded (no conflicts)
+              if git diff-index --quiet HEAD --; then
+                echo "No changes to merge"
+                echo "merged=false" >> $GITHUB_OUTPUT
+                echo "needs_manual=false" >> $GITHUB_OUTPUT
+                echo "merge_attempted=false" >> $GITHUB_OUTPUT
+                exit 0
+              fi
+              git commit -m "chore: merge dev → staging [$(date +'%Y-%m-%d')]"
+              echo "merge_attempted=true" >> $GITHUB_OUTPUT
+            elif grep -qi "conflict" merge_output.log || grep -qi "CONFLICT" merge_output.log; then
+              # Merge conflicts - expected, not a failure
               echo "merged=false" >> $GITHUB_OUTPUT
-              exit 0
+              echo "needs_manual=true" >> $GITHUB_OUTPUT
+              echo "merge_attempted=false" >> $GITHUB_OUTPUT
+              echo "⚠️ Merge conflicts detected. Manual merge required."
+              echo "::warning::Merge conflicts between dev and staging. Please resolve manually."
+              exit 0  # Exit successfully - conflicts are not a failure
+            else
+              # Merge command failed for unknown reason - REAL FAILURE
+              echo "merged=false" >> $GITHUB_OUTPUT
+              echo "needs_manual=true" >> $GITHUB_OUTPUT
+              echo "merge_attempted=false" >> $GITHUB_OUTPUT
+              echo "::error::Merge command failed unexpectedly!"
+              cat merge_output.log
+              exit 1  # REAL FAILURE
             fi
-            git commit -m "chore: merge dev → staging [$(date +'%Y-%m-%d')]"
           fi
-                    
-          git push origin staging
-          echo "merged=true" >> $GITHUB_OUTPUT
-          echo "✅ Successfully merged dev to staging"
+          
+          # Try to push, handle branch protection gracefully
+          set +e  # Don't exit on error
+          git push origin staging 2>&1 | tee push_output.log
+          PUSH_EXIT=$?
+          set -e
+          
+          if [ $PUSH_EXIT -eq 0 ]; then
+            echo "merged=true" >> $GITHUB_OUTPUT
+            echo "needs_manual=false" >> $GITHUB_OUTPUT
+            echo "✅ Successfully merged dev to staging"
+          else
+            # Check if failure was due to branch protection
+            if grep -qE "protected branch|Required status check|Enforce branch flow|GH006" push_output.log; then
+              echo "merged=false" >> $GITHUB_OUTPUT
+              echo "needs_manual=true" >> $GITHUB_OUTPUT
+              echo "⚠️ Branch protection prevented auto-merge. Manual merge required."
+              echo "::warning::Auto-merge blocked by branch protection (Enforce branch flow check required). Please merge dev to staging manually."
+              exit 0  # Exit successfully, not a real failure
+            else
+              echo "merged=false" >> $GITHUB_OUTPUT
+              echo "needs_manual=true" >> $GITHUB_OUTPUT
+              echo "::error::Push failed for unknown reason"
+              cat push_output.log
+              exit 1  # Real failure
+            fi
+          fi
 
       - name: Staging Sanity Check - Verify Embeddings
-        if: steps.merge.outputs.merged == 'true'
+        if: steps.merge.outputs.merged == 'true' && steps.merge.outputs.needs_manual != 'true'
         shell: bash
         run: |
           echo "Running sanity check on merged staging code..."
@@ -299,7 +350,7 @@ jobs:
           fi
 
       - name: Verify test results from dev CI
-        if: steps.merge.outputs.merged == 'true'
+        if: steps.merge.outputs.merged == 'true' && steps.merge.outputs.needs_manual != 'true'
         run: |
           if [ ! -d ./test-results ]; then
             echo "::error::Test results artifacts missing from dev CI"
@@ -308,7 +359,7 @@ jobs:
           echo "✅ Test artifacts verified from dev CI build"
 
       - name: Tag pre-release from staging
-        if: steps.merge.outputs.merged == 'true'
+        if: steps.merge.outputs.merged == 'true' && steps.merge.outputs.needs_manual != 'true'
         run: |
           VERSION=${{ steps.version.outputs.version }}
           PRERELEASE_TAG="v${VERSION}-pre"
@@ -322,7 +373,7 @@ jobs:
           echo "✅ Tagged pre-release: $PRERELEASE_TAG"
 
       - name: Create/Update GitHub Pre-release
-        if: steps.merge.outputs.merged == 'true'
+        if: steps.merge.outputs.merged == 'true' && steps.merge.outputs.needs_manual != 'true'
         uses: ncipollo/release-action@v1
         with:
           tag: v${{ steps.version.outputs.version }}-pre
@@ -335,8 +386,29 @@ jobs:
             ## Pre-release v${{ steps.version.outputs.version }}-pre
             Auto-published from staging merge.
 
-      - name: Comment on merge failure
-        if: failure()
+      - name: Manual merge notification
+        if: steps.merge.outputs.needs_manual == 'true'
         run: |
-          echo "::warning::Auto-merge failed. Manual merge required."
-          echo "Review the workflow run and resolve conflicts manually."
+          echo "::notice title=Manual Merge Required::Auto-merge to staging blocked. Please resolve conflicts and merge dev to staging manually."
+          echo "## ⚠️ Manual Merge Required" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Auto-merge to staging was blocked. Manual intervention needed." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Reason:" >> $GITHUB_STEP_SUMMARY
+          if grep -qi "conflict" push_output.log 2>/dev/null || grep -qi "CONFLICT" merge_output.log 2>/dev/null; then
+            echo "- Merge conflicts detected between dev and staging" >> $GITHUB_STEP_SUMMARY
+          elif grep -qE "protected branch|Required status check|Enforce branch flow|GH006" push_output.log 2>/dev/null; then
+            echo "- Branch protection requires 'Enforce branch flow' status check" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "- Unknown reason (check logs above)" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Next Steps:" >> $GITHUB_STEP_SUMMARY
+          echo '```bash' >> $GITHUB_STEP_SUMMARY
+          echo "git checkout staging" >> $GITHUB_STEP_SUMMARY
+          echo "git merge dev" >> $GITHUB_STEP_SUMMARY
+          echo "# Resolve any conflicts, then:" >> $GITHUB_STEP_SUMMARY
+          echo "git push" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "The Pre-Release workflow will automatically run after successful merge." >> $GITHUB_STEP_SUMMARY
