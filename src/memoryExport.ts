@@ -27,7 +27,7 @@ function formatEntryAsMarkdown(entry: MemoryEntry): string {
 }
 
 /**
- * Export SQLite database back to markdown files
+ * Export SQLite database to single consolidated markdown file
  */
 export async function exportSQLiteToMarkdown(
   memoryPath: vscode.Uri,
@@ -41,11 +41,11 @@ export async function exportSQLiteToMarkdown(
   };
 
   const types: MemoryEntry['file_type'][] = [
+    'BRIEF',
+    'PATTERN',
     'CONTEXT',
     'DECISION',
-    'PROGRESS',
-    'PATTERN',
-    'BRIEF'
+    'PROGRESS'
   ];
 
   try {
@@ -56,21 +56,23 @@ export async function exportSQLiteToMarkdown(
     return result;
   }
 
-  // Export each type to its corresponding file
+  // Build single consolidated markdown file
+  const sections: string[] = [];
+  sections.push('# AI-Memory Export\n');
+  sections.push(`Generated: ${new Date().toISOString()}\n`);
+  sections.push('---\n');
+
+  // Collect all entries by type
   for (const type of types) {
-    const fileName = getFileNameForType(type);
-    const filePath = vscode.Uri.joinPath(memoryPath, fileName);
+    const typeName = type.charAt(0) + type.slice(1).toLowerCase();
+    sections.push(`## ${typeName}\n`);
 
     try {
       // Get all entries of this type (up to 10000)
       const queryResult = await store.queryByType(type, 10000);
       
       if (queryResult.entries.length === 0) {
-        // Create empty file with header if needed
-        const header = `# ${fileName.replace('.md', '').replace(/([A-Z])/g, ' $1').trim()}\n\n`;
-        const content = Buffer.from(header);
-        await vscode.workspace.fs.writeFile(filePath, content);
-        result.filesExported.push(fileName);
+        sections.push('*No entries*\n');
         continue;
       }
 
@@ -84,21 +86,29 @@ export async function exportSQLiteToMarkdown(
         formatEntryAsMarkdown(entry)
       );
 
-      // Add header
-      const header = `# ${fileName.replace('.md', '').replace(/([A-Z])/g, ' $1').trim()}\n\n`;
-      const content = header + lines.join('\n\n') + '\n';
-
-      const buffer = Buffer.from(content);
-      await vscode.workspace.fs.writeFile(filePath, buffer);
-
-      result.filesExported.push(fileName);
+      sections.push(lines.join('\n\n') + '\n');
       result.entriesExported += sortedEntries.length;
     } catch (err) {
-      result.errors.push(`Failed to export ${fileName}: ${err}`);
+      sections.push(`*Error loading ${typeName}: ${err}*\n`);
+      result.errors.push(`Failed to export ${typeName}: ${err}`);
     }
+    
+    sections.push('\n---\n');
   }
 
-  result.success = result.filesExported.length > 0 && result.errors.length === 0;
+  // Write single memory.md file
+  try {
+    const filePath = vscode.Uri.joinPath(memoryPath, 'memory.md');
+    const content = sections.join('\n');
+    const buffer = Buffer.from(content);
+    await vscode.workspace.fs.writeFile(filePath, buffer);
+
+    result.filesExported.push('memory.md');
+    result.success = result.errors.length === 0;
+  } catch (err) {
+    result.errors.push(`Failed to write memory.md: ${err}`);
+  }
+
   return result;
 }
 
