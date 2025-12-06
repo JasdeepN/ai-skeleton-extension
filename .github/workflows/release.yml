@@ -33,22 +33,12 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
 
-      - name: Get current version and increment
+      - name: Get version
         id: release-version
         run: |
-          CURRENT_VERSION=$(jq -r '.version' package.json | sed 's/-.*$//')
-          
-          # Parse version components
-          MAJOR=$(echo "$CURRENT_VERSION" | cut -d. -f1)
-          MINOR=$(echo "$CURRENT_VERSION" | cut -d. -f2)
-          PATCH=$(echo "$CURRENT_VERSION" | cut -d. -f3)
-          
-          # Increment patch for release
-          NEW_PATCH=$((PATCH + 1))
-          RELEASE_VERSION="${MAJOR}.${MINOR}.${NEW_PATCH}"
-          
-          echo "version=$RELEASE_VERSION" >> $GITHUB_OUTPUT
-          echo "📦 Release version: $RELEASE_VERSION (incremented from ${CURRENT_VERSION})"
+          VERSION=$(jq -r '.version' package.json | sed 's/-.*$//')
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "📦 Release version: $VERSION"
 
       - name: Check for existing release tag
         id: tag-check
