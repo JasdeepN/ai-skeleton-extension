@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { getMemoryService, MemoryFileName } from './memoryService';
+import { getMemoryService } from './memoryService';
 import { getPrompts } from './promptStore';
 
 const EXPECTED_TOOLS = [
@@ -138,15 +138,9 @@ export class DiagnosticsTreeProvider implements vscode.TreeDataProvider<vscode.T
     items.push(new StatusItem(`Memory Bank: ${active ? 'ACTIVE' : 'INACTIVE'}`, active ? 'ok' : 'warn', active ? { command: 'aiSkeleton.memory.show', title: 'Show Memory' } : { command: 'aiSkeleton.memory.create', title: 'Create Memory Bank' }));
     if (active && service.state.path) {
       items.push(new StatusItem(`Path: ${service.state.path.fsPath}`, 'ok'));
-      const files: MemoryFileName[] = ['activeContext.md','decisionLog.md','progress.md','systemPatterns.md','projectBrief.md'];
-      for (const f of files) {
-        let ok = false;
-        try {
-          const uri = vscode.Uri.joinPath(service.state.path!, f);
-          await vscode.workspace.fs.stat(uri);
-          ok = true;
-        } catch {}
-        items.push(new StatusItem(`${f}: ${ok ? 'present' : 'missing'}`, ok ? 'ok' : 'error'));
+      items.push(new StatusItem(`Backend: ${service.state.backend || 'none'}`, 'ok'));
+      if (service.state.dbPath) {
+        items.push(new StatusItem(`Database: memory.db`, 'ok'));
       }
     }
     return items;

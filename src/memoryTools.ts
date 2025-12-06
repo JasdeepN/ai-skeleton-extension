@@ -4,7 +4,7 @@
 // Works in normal VS Code installs via VSIX; EDH (F5) is optional for development
 
 import * as vscode from 'vscode';
-import { getMemoryService, MemoryFileName } from './memoryService';
+import { getMemoryService } from './memoryService';
 
 // Tool parameter interfaces
 interface ShowMemoryParams {
@@ -40,14 +40,7 @@ interface MarkDeprecatedParams {
   reason: string;
 }
 
-// Valid memory files (consolidated to 5)
-const VALID_FILES: MemoryFileName[] = [
-  'activeContext.md',
-  'decisionLog.md', 
-  'progress.md',
-  'systemPatterns.md',
-  'projectBrief.md'
-];
+// Memory tools use SQLite backend - no file validation needed
 
 /**
  * Tool: Show AI-Memory contents
@@ -228,47 +221,6 @@ export class UpdateProjectBriefTool implements vscode.LanguageModelTool<UpdateBr
 }
 
 /**
- * Tool: Mark item as deprecated (for cleanup without deletion)
- */
-export class MarkDeprecatedTool implements vscode.LanguageModelTool<MarkDeprecatedParams> {
-  async invoke(
-    options: vscode.LanguageModelToolInvocationOptions<MarkDeprecatedParams>,
-    _token: vscode.CancellationToken
-  ): Promise<vscode.LanguageModelToolResult> {
-    const service = getMemoryService();
-    const { file, item, reason } = options.input;
-
-    if (!VALID_FILES.includes(file as MemoryFileName)) {
-      return new vscode.LanguageModelToolResult([
-        new vscode.LanguageModelTextPart(`Invalid file: ${file}. Valid files: ${VALID_FILES.join(', ')}`)
-      ]);
-    }
-
-    const success = await service.markDeprecated(file as MemoryFileName, item, reason);
-    return new vscode.LanguageModelToolResult([
-      new vscode.LanguageModelTextPart(success 
-        ? `✓ Marked as deprecated: ${item}` 
-        : '✗ Failed to mark as deprecated')
-    ]);
-  }
-
-  async prepareInvocation(
-    options: vscode.LanguageModelToolInvocationPrepareOptions<MarkDeprecatedParams>,
-    _token: vscode.CancellationToken
-  ) {
-    return {
-      invocationMessage: `Marking deprecated: ${options.input.item}`,
-      confirmationMessages: {
-        title: 'Mark as Deprecated',
-        message: new vscode.MarkdownString(
-          `Mark this item as deprecated?\n\n**Item:** ${options.input.item}\n\n**Reason:** ${options.input.reason}`
-        ),
-      },
-    };
-  }
-}
-
-/**
  * Register all memory tools with the Language Model API
  * Uses stable VS Code LM Tools API (available since VS Code 1.95+)
  */
@@ -295,10 +247,9 @@ export function registerMemoryTools(context: vscode.ExtensionContext): void {
       vscode.lm.registerTool('aiSkeleton_updateContext', new UpdateContextTool()),
       vscode.lm.registerTool('aiSkeleton_updateProgress', new UpdateProgressTool()),
       vscode.lm.registerTool('aiSkeleton_updatePatterns', new UpdatePatternsTool()),
-      vscode.lm.registerTool('aiSkeleton_updateProjectBrief', new UpdateProjectBriefTool()),
-      vscode.lm.registerTool('aiSkeleton_markDeprecated', new MarkDeprecatedTool())
+      vscode.lm.registerTool('aiSkeleton_updateProjectBrief', new UpdateProjectBriefTool())
     );
-    console.log('[AI Skeleton] Memory tools registered successfully (7 LM tools)');
+    console.log('[AI Skeleton] Memory tools registered successfully (6 LM tools)');
   } catch (err) {
     console.error('[AI Skeleton] Failed to register memory tools:', err);
     void vscode.window.showErrorMessage(`AI Skeleton: Failed to register memory tools: ${err}`);

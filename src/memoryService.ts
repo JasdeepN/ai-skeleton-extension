@@ -14,13 +14,6 @@ export interface MemoryBankState {
   activity?: 'idle' | 'read' | 'write';
   dbPath?: string;
   backend?: 'better-sqlite3' | 'sql.js' | 'none';
-  files: {
-    activeContext: boolean;
-    decisionLog: boolean;
-    systemPatterns: boolean;
-    progress: boolean;
-    projectBrief: boolean;
-  };
 }
 
 export interface MemoryEntry {
@@ -45,23 +38,7 @@ export interface DashboardMetrics {
   tasks: DashboardTasksSnapshot;
 }
 
-const MEMORY_FILES = [
-  'activeContext.md',
-  'decisionLog.md',
-  'progress.md',
-  'systemPatterns.md',
-  'projectBrief.md'
-] as const;
-
-export type MemoryFileName = typeof MEMORY_FILES[number];
-
-const FILE_KEY_MAP: Record<string, keyof MemoryBankState['files']> = {
-  'activeContext.md': 'activeContext',
-  'decisionLog.md': 'decisionLog',
-  'systemPatterns.md': 'systemPatterns',
-  'progress.md': 'progress',
-  'projectBrief.md': 'projectBrief'
-};
+// SQLite is the single source of truth - no markdown files tracked
 
 const FOLDER_NAMES = ['AI-Memory', 'memory-bank'];
 
@@ -70,14 +47,7 @@ export class MemoryBankService {
     active: false,
     path: null,
     activity: 'idle',
-    backend: 'none',
-    files: {
-      activeContext: false,
-      decisionLog: false,
-      systemPatterns: false,
-      progress: false,
-      projectBrief: false
-    }
+    backend: 'none'
   };
 
   private _store: MemoryStore;
@@ -91,10 +61,6 @@ export class MemoryBankService {
 
   get state(): MemoryBankState {
     return this._state;
-  }
-
-  get memoryFiles(): readonly string[] {
-    return MEMORY_FILES;
   }
 
   private getToday(): string {
@@ -126,8 +92,7 @@ export class MemoryBankService {
         active: false,
         path: null,
         activity: 'idle',
-        backend: 'none',
-        files: { activeContext: false, decisionLog: false, systemPatterns: false, progress: false, projectBrief: false }
+        backend: 'none'
       };
       this._onDidChangeState.fire(this._state);
       return this._state;
@@ -164,8 +129,7 @@ export class MemoryBankService {
                 active: false,
                 path: memoryPath,
                 activity: 'idle',
-                backend: 'none',
-                files: { activeContext: false, decisionLog: false, systemPatterns: false, progress: false, projectBrief: false }
+                backend: 'none'
               };
               this._onDidChangeState.fire(this._state);
               return this._state;
@@ -180,27 +144,7 @@ export class MemoryBankService {
               console.log('[MemoryService] Migration complete:', migrationResult);
             }
 
-            // Verify core files exist or create them
-            const filesState: MemoryBankState['files'] = {
-              activeContext: false,
-              decisionLog: false,
-              systemPatterns: false,
-              progress: false,
-              projectBrief: false
-            };
-
-            for (const file of MEMORY_FILES) {
-              try {
-                await vscode.workspace.fs.stat(vscode.Uri.joinPath(memoryPath, file));
-                const key = FILE_KEY_MAP[file];
-                if (key) filesState[key] = true;
-              } catch {
-                // File doesn't exist yet, may be created by export
-              }
-            }
-
             // SQLite-only mode: Memory bank is active if database is initialized
-            // Markdown files are optional (created via Dump Memory command)
             const dbInitialized = this._store.getBackend() !== 'none';
 
             this._state = {
@@ -208,14 +152,13 @@ export class MemoryBankService {
               path: memoryPath,
               dbPath,
               activity: 'idle',
-              backend: this._store.getBackend(),
-              files: filesState
+              backend: this._store.getBackend()
             };
             
             console.log('[MemoryService] Memory bank detected:', {
               active: this._state.active,
               backend: this._state.backend,
-              files: filesState
+              dbPath: this._state.dbPath
             });
             
             this._onDidChangeState.fire(this._state);
@@ -231,8 +174,7 @@ export class MemoryBankService {
       active: false,
       path: null,
       activity: 'idle',
-      backend: 'none',
-      files: { activeContext: false, decisionLog: false, systemPatterns: false, progress: false, projectBrief: false }
+      backend: 'none'
     };
     this._onDidChangeState.fire(this._state);
     return this._state;
@@ -445,14 +387,6 @@ export class MemoryBankService {
   }
 
   /**
-   * Mark as deprecated
-   */
-  async markDeprecated(filename: MemoryFileName, item: string, reason: string): Promise<boolean> {
-    // Simplified - just log to decision log
-    return this.logDecision(`DEPRECATED: ${item}`, `Reason: ${reason}`);
-  }
-
-  /**
    * Mark as superseded
    */
   async markSuperseded(originalDecision: string, newApproach: string): Promise<boolean> {
@@ -504,14 +438,6 @@ export class MemoryBankService {
     }
 
     return sections.join('\n---\n\n');
-  }
-
-  /**
-   * Get URI for memory file (for opening in editor)
-   */
-  getMemoryFileUri(filename: MemoryFileName): vscode.Uri | null {
-    if (!this._state.path) return null;
-    return vscode.Uri.joinPath(this._state.path, filename);
   }
 
   /**
