@@ -20,9 +20,11 @@ env:
 jobs:
   # ============================================
   # Stage 1: Build & Test (runs on all platforms)
+  # Skipped on staging push - dev already validated
   # ============================================
   build-and-test:
     name: Build & Test (${{ matrix.os }}, Node ${{ matrix.node }})
+    if: github.ref != 'refs/heads/staging' || github.event_name == 'pull_request'
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -117,6 +119,7 @@ jobs:
   # ============================================
   security:
     name: CodeQL Security Analysis
+    if: github.ref != 'refs/heads/staging' || github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -141,10 +144,60 @@ jobs:
           category: "/language:javascript"
 
   # ============================================
-  # Stage 2: Smoke Test VSIX (after build passes)
+  # Staging Quick Check (lightweight validation)
+  # Only runs on staging push, not on dev or PRs
+  # ============================================
+  staging-sanity-check:
+    name: Staging Sanity Check
+    if: github.ref == 'refs/heads/staging' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Verify embeddings are current
+        shell: bash
+        run: |
+          echo "Running embedding scripts to ensure latest content..."
+          npm run embed-all
+          
+          # Check if embeddings changed
+          if git diff --quiet; then
+            echo "✅ Embeddings are up-to-date"
+          else
+            echo "::error::Embeddings are out-of-date! Run 'npm run embed-all' locally before pushing."
+            echo "Modified files:"
+            git diff --name-only
+            exit 1
+          fi
+
+      - name: TypeScript Compilation Check
+        shell: bash
+        run: |
+          if ! npx tsc --noEmit; then
+            echo "::error::TypeScript compilation failed"
+            exit 1
+          fi
+          echo "✅ TypeScript compilation successful"
+
+      - name: Quick unit tests (smoke test)
+        run: npm test -- --testPathIgnorePatterns="e2e" --maxWorkers=2
+
+  # ============================================
+  # Stage 2: Smoke Test VSIX (after build passes on dev)
   # ============================================
   smoke-test:
     name: Smoke Test VSIX
+    if: github.ref != 'refs/heads/staging' || github.event_name == 'pull_request'
     needs: build-and-test
     runs-on: ubuntu-latest
     steps:
