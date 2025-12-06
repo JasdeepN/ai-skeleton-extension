@@ -4,8 +4,7 @@ on:
   push:
     branches: [ dev ]
   pull_request:
-    branches: [ dev, release, main ]
-  workflow_dispatch:
+    branches: [ dev, release ]
 
 jobs:
   test:

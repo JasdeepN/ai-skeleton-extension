@@ -2,7 +2,7 @@
   "name": "ai-skeleton-extension",
   "displayName": "AI Skeleton Prompts & Memory",
   "description": "Complete AI agent toolkit: Native memory management (AI-Memory), workflow prompts, MCP integration, and agent definitions.",
-  "version": "0.1.32",
+  "version": "0.2.0",
   "publisher": "JasdeepN",
   "license": "SEE LICENSE IN LICENSE",
   "repository": {
@@ -130,6 +130,16 @@
       {
         "command": "aiSkeleton.memory.updatePatterns",
         "title": "AI Skeleton: Update System Patterns"
+      },
+      {
+        "command": "aiSkeleton.memoryDashboard.refresh",
+        "title": "AI Skeleton: Refresh Memory Dashboard",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "aiSkeleton.memoryDashboard.addTask",
+        "title": "AI Skeleton: Add Task to Memory",
+        "icon": "$(plus)"
       },
       {
         "command": "aiSkeleton.memory.refresh",
@@ -380,6 +390,11 @@
           "id": "aiSkeletonDiagnostics",
           "name": "Diagnostics",
           "icon": "resources/ai-skeleton.svg"
+        },
+        {
+          "id": "aiSkeletonMemoryDashboard",
+          "name": "Memory Dashboard",
+          "icon": "resources/ai-skeleton.svg"
         }
       ],
       "explorer": [
@@ -453,6 +468,16 @@
           "command": "aiSkeleton.memory.create",
           "when": "view == aiSkeletonMemory",
           "group": "navigation"
+        },
+        {
+          "command": "aiSkeleton.memoryDashboard.refresh",
+          "when": "view == aiSkeletonMemoryDashboard",
+          "group": "navigation"
+        },
+        {
+          "command": "aiSkeleton.memoryDashboard.addTask",
+          "when": "view == aiSkeletonMemoryDashboard",
+          "group": "navigation"
         }
       ]
     }
@@ -494,6 +519,8 @@
     "vsce": "^2.15.0"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.28.0",
+    "js-tiktoken": "^1.0.14",
     "minimist": "^1.2.8",
     "sql.js": "^1.12.0"
   }

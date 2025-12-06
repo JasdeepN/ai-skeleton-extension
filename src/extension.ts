@@ -3,13 +3,16 @@ import { getPrompts, Prompt } from './promptStore';
 import { getAgents, AgentTemplate, getProtectedFilesEmbedded } from './agentStore';
 import { PromptTreeProvider } from './treeProvider';
 import { getMemoryService } from './memoryService';
+import { getMemoryStore } from './memoryStore';
 import { registerMemoryTools } from './memoryTools';
 import { registerMemoryTreeView } from './memoryTreeProvider';
+import { registerMemoryDashboardView } from './memoryDashboardProvider';
 import { registerMCPTreeView } from './mcpTreeProvider';
 import { getMCPConfigString, getMCPServerList } from './mcpStore';
 import { registerDiagnosticsView } from './diagnosticsProvider';
 import { maybeAutoStartMCPs, startMCPServers } from './mcpManager';
 import { showSetupDialog, checkForUpdates, reinstallAll } from './setupService';
+import { TokenCounterService } from './tokenCounterService';
 
 async function resolvePrompts(): Promise<Prompt[]> {
   const source = vscode.workspace.getConfiguration().get<'auto'|'embedded'|'workspace'>('aiSkeleton.prompts.source', 'auto');
@@ -28,6 +31,63 @@ export async function activate(context: vscode.ExtensionContext) {
     const errMsg = err instanceof Error ? err.message : String(err);
     console.error('[Extension] Error details:', errMsg);
   }
+
+  // Initialize token counter service with LRU cache
+  const tokenCounterService = TokenCounterService.getInstance();
+  try {
+    // Wire memoryStore to token counter for metrics persistence
+    const memoryStore = getMemoryStore();
+    tokenCounterService.setMemoryStore(memoryStore);
+    console.log('[Extension] TokenCounterService initialized with metrics persistence');
+  } catch (err) {
+    console.warn('[Extension] TokenCounterService initialization warning:', err);
+  }
+
+  // Agent call middleware for token tracking
+  const agentCallMiddleware = async (agentId: string, systemPrompt: string, messages: Array<{ role: 'user' | 'assistant'; content: string }>, modelName: string = 'claude-3-5-sonnet') => {
+    try {
+      // Count tokens for the agent call
+      const tokenResult = await tokenCounterService.countTokens({
+        model: modelName,
+        systemPrompt,
+        messages
+      });
+
+      // Calculate context budget
+      const contextBudget = tokenCounterService.getContextBudget(tokenResult.totalTokens);
+
+      // Log token metric to memoryStore
+      const memoryStore = getMemoryStore();
+      await memoryStore.logTokenMetric({
+        timestamp: new Date().toISOString(),
+        model: modelName,
+        input_tokens: tokenResult.inputTokens,
+        output_tokens: tokenResult.outputTokens,
+        total_tokens: tokenResult.totalTokens,
+        context_status: contextBudget.status
+      });
+
+      console.log(`[AgentCallMiddleware] Agent: ${agentId}, Status: ${contextBudget.status}, Remaining: ${contextBudget.remaining}K tokens`);
+
+      return {
+        totalTokens: tokenResult.totalTokens,
+        budget: contextBudget,
+        cached: tokenResult.cached
+      };
+    } catch (err) {
+      console.error('[AgentCallMiddleware] Error tracking agent call:', err);
+      // Return a default safe budget on error
+      return {
+        totalTokens: 0,
+        budget: tokenCounterService.getContextBudget(0),
+        cached: false
+      };
+    }
+  };
+
+  // Store middleware globally so memoryTools can access it for tool invocations
+  // This allows tools to track token usage when invoked by agents
+  (global as any).__agentCallMiddleware = agentCallMiddleware;
 
   // Detect if running in test environment
   const isTestEnvironment = process.env.VSCODE_TEST_ENV === 'true' || 
@@ -70,6 +130,9 @@ export async function activate(context: vscode.ExtensionContext) {
   // Register memory tree view
   const { treeView: memoryTreeView, provider: memoryTreeProvider } = registerMemoryTreeView(context);
 
+  // Register memory dashboard (Activity Bar)
+  const { treeView: memoryDashboardView, provider: memoryDashboardProvider } = registerMemoryDashboardView(context);
+
   // Register MCP tree view
   const { treeView: mcpTreeView, provider: mcpTreeProvider } = registerMCPTreeView(context);
 
@@ -107,6 +170,59 @@ export async function activate(context: vscode.ExtensionContext) {
   updateMemoryStatus();
   memoryStatusBar.show();
   context.subscriptions.push(memoryStatusBar);
+
+  // Context budget status bar - displays token usage and remaining budget
+  const contextStatusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 10);
+  contextStatusBar.command = 'aiSkeleton.memory.showMetrics';
+  contextStatusBar.text = '$(zap) Context: Healthy';
+  contextStatusBar.tooltip = 'Token usage and context budget status. Click to view metrics.';
+  contextStatusBar.backgroundColor = undefined;
+  
+  // Update context status based on latest metrics
+  const updateContextStatus = async () => {
+    try {
+      const memoryStore = getMemoryStore();
+      const latestMetric = await memoryStore.getLatestEntry('token_metrics');
+      
+      if (!latestMetric) {
+        contextStatusBar.text = '$(zap) Context: No Data';
+        contextStatusBar.tooltip = 'No metrics recorded yet.';
+        contextStatusBar.backgroundColor = undefined;
+        return;
+      }
+
+      const status = latestMetric.context_status || 'healthy';
+      const remaining = 160 - (latestMetric.total_tokens || 0);
+      const percentage = Math.round(((latestMetric.total_tokens || 0) / 160) * 100);
+
+      if (status === 'critical') {
+        contextStatusBar.text = `$(alert) Context: CRITICAL (${remaining}K remaining)`;
+        contextStatusBar.tooltip = `Critical: ${percentage}% budget used. Recommend starting new chat.`;
+        contextStatusBar.backgroundColor = new vscode.ThemeColor('statusBarItem.errorBackground');
+      } else if (status === 'warning') {
+        contextStatusBar.text = `$(warning) Context: Warning (${remaining}K remaining)`;
+        contextStatusBar.tooltip = `Warning: ${percentage}% budget used. Approaching limit.`;
+        contextStatusBar.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');
+      } else {
+        contextStatusBar.text = `$(zap) Context: Healthy (${remaining}K remaining)`;
+        contextStatusBar.tooltip = `Healthy: ${percentage}% budget used. Continue working.`;
+        contextStatusBar.backgroundColor = undefined;
+      }
+    } catch (err) {
+      console.warn('[ContextStatus] Failed to update context status:', err);
+      contextStatusBar.text = '$(zap) Context: Unknown';
+      contextStatusBar.backgroundColor = undefined;
+    }
+  };
+
+  // Initial update and periodic updates every 10 seconds
+  await updateContextStatus();
+  contextStatusBar.show();
+  context.subscriptions.push(contextStatusBar);
+  
+  // Update context status periodically (when metrics are logged)
+  const statusUpdateInterval = setInterval(updateContextStatus, 10000);
+  context.subscriptions.push(new vscode.Disposable(() => clearInterval(statusUpdateInterval)));
 
   // Listen for memory state changes
   memoryService.onDidChangeState(() => {
@@ -816,6 +932,108 @@ export async function activate(context: vscode.ExtensionContext) {
     }
   }));
 
+  // Show token metrics and context budget
+  context.subscriptions.push(vscode.commands.registerCommand('aiSkeleton.memory.showMetrics', async () => {
+    try {
+      const memoryStore = getMemoryStore();
+      const latestMetric = await memoryStore.getLatestEntry('token_metrics');
+      
+      if (!latestMetric) {
+        await vscode.window.showInformationMessage(
+          'No metrics recorded yet. Metrics are collected when agents use memory tools.'
+        );
+        return;
+      }
+
+      const percentage = Math.round(((latestMetric.total_tokens || 0) / 160) * 100);
+      const remaining = 160 - (latestMetric.total_tokens || 0);
+      const status = latestMetric.context_status || 'unknown';
+      const timestamp = new Date(latestMetric.timestamp).toLocaleString();
+
+      const message = `**Token Metrics**\n\n- **Status**: ${status.toUpperCase()}\n- **Used**: ${latestMetric.total_tokens || 0}K tokens (${percentage}%)\n- **Remaining**: ${remaining}K tokens\n- **Last Updated**: ${timestamp}\n- **Model**: ${latestMetric.model || 'claude-3-5-sonnet'}`;
+
+      await vscode.window.showInformationMessage(message, { modal: true });
+    } catch (err) {
+      console.error('[ShowMetrics] Error:', err);
+      await vscode.window.showErrorMessage(`Failed to show metrics: ${err}`);
+    }
+  }));
+
+  // Show detailed metrics with analytics
+  context.subscriptions.push(vscode.commands.registerCommand('aiSkeleton.memory.showMetricsDetail', async () => {
+    try {
+      const memoryStore = getMemoryStore();
+      const metricsService = require('./metricsService').getMetricsService();
+      
+      // Fetch metrics summary
+      const summary = await metricsService.getDashboardMetrics();
+      
+      if (summary.callCount === 0) {
+        await vscode.window.showInformationMessage(
+          'No metrics recorded yet. Metrics are collected when agents use memory tools.'
+        );
+        return;
+      }
+
+      // Get 7-day history for trends
+      const tokenMetrics = await metricsService.getTokenMetrics(7);
+      const trend = await metricsService.getTokenTrend(7);
+      const avgQueryTime = await metricsService.getAverageQueryTime(undefined, 7);
+      const cacheHitRate = await metricsService.getCacheHitRate(7);
+
+      // Build detailed analytics message
+      const trendEmoji = trend === 'increasing' ? '📈' : trend === 'decreasing' ? '📉' : '➡️';
+      const statusEmoji = summary.currentStatus === 'critical' ? '🔴' : summary.currentStatus === 'warning' ? '🟡' : '🟢';
+      
+      const detailedMetrics = [
+        `${statusEmoji} **Current Status**: ${summary.currentStatus.toUpperCase()}`,
+        `\n**Token Usage**:`,
+        `- Used: ${summary.totalTokensUsed}K / 160K tokens (${summary.percentageUsed}%)`,
+        `- Remaining: ${summary.remainingBudget}K tokens`,
+        `- Average per call: ${summary.averageTokensPerCall}K tokens`,
+        `\n${trendEmoji} **7-Day Trend**: ${trend.charAt(0).toUpperCase() + trend.slice(1)}`,
+        `- Total calls: ${summary.callCount}`,
+        `- Avg query time: ${avgQueryTime.toFixed(0)}ms`,
+        `- Cache hit rate: ${cacheHitRate.toFixed(1)}%`,
+        `\n**Last Updated**: ${summary.lastUpdated}`
+      ].join('\n');
+
+      await vscode.window.showInformationMessage(detailedMetrics, { modal: true });
+    } catch (err) {
+      console.error('[ShowMetricsDetail] Error:', err);
+      await vscode.window.showErrorMessage(`Failed to show detailed metrics: ${err}`);
+    }
+  }));
+
+  // Clear metrics command
+  context.subscriptions.push(vscode.commands.registerCommand('aiSkeleton.memory.clearMetrics', async () => {
+    try {
+      const confirm = await vscode.window.showWarningMessage(
+        'Are you sure you want to clear all metrics? This cannot be undone.',
+        { modal: true },
+        'Clear All Metrics'
+      );
+      
+      if (confirm !== 'Clear All Metrics') {
+        return;
+      }
+
+      const memoryStore = getMemoryStore();
+      // Clear with retention days = 0 to delete everything
+      const cleaned = await memoryStore.cleanupMetrics(0, 0);
+      
+      if (cleaned) {
+        await vscode.window.showInformationMessage('All metrics have been cleared.');
+        console.log('[Extension] All metrics cleared by user');
+      } else {
+        await vscode.window.showWarningMessage('Failed to clear metrics.');
+      }
+    } catch (err) {
+      console.error('[ClearMetrics] Error:', err);
+      await vscode.window.showErrorMessage(`Failed to clear metrics: ${err}`);
+    }
+  }));
+
   // Create memory bank
   context.subscriptions.push(vscode.commands.registerCommand('aiSkeleton.memory.create', async () => {
     const ws = vscode.workspace.workspaceFolders;
@@ -986,6 +1204,39 @@ export async function activate(context: vscode.ExtensionContext) {
     }
   }));
 
+  // Track token usage command (for agent integration and metrics collection)
+  context.subscriptions.push(vscode.commands.registerCommand('aiSkeleton.memory.trackTokenUsage', async (options?: { model?: string; inputTokens?: number; outputTokens?: number; totalTokens?: number; contextStatus?: string }) => {
+    try {
+      if (!options || !options.model || typeof options.totalTokens !== 'number') {
+        // Show token counter status in information message
+        const stats = tokenCounterService.getCacheStats();
+        const cacheSize = stats.size;
+        const ttl = (stats.ttlMs / 60000).toFixed(1);
+        vscode.window.showInformationMessage(`Token counter active (Cache: ${cacheSize} entries, TTL: ${ttl}m)`);
+        return;
+      }
+
+      // Log token metric asynchronously
+      const timestamp = new Date().toISOString();
+      const contextStatus = options.contextStatus || 'unknown';
+      
+      // Store in metrics database
+      const memoryStore = getMemoryStore();
+      await memoryStore.logTokenMetric({
+        timestamp,
+        model: options.model,
+        input_tokens: options.inputTokens || 0,
+        output_tokens: options.outputTokens || 0,
+        total_tokens: options.totalTokens,
+        context_status: contextStatus as 'healthy' | 'warning' | 'critical'
+      });
+      console.log('[Extension] Token metric logged:', { model: options.model, total: options.totalTokens, status: contextStatus });
+    } catch (err) {
+      console.error('[Extension] Error tracking token usage:', err);
+      vscode.window.showErrorMessage(`Token tracking error: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }));
+
   // Refresh prompts tree view command
   context.subscriptions.push(vscode.commands.registerCommand('aiSkeleton.prompts.refresh', async () => {
     await reload();
@@ -1007,4 +1258,18 @@ function openPromptDocument(prompt: Prompt | undefined) {
   docPromise.then((d: vscode.TextDocument) => vscode.window.showTextDocument(d, { preview: false }));
 }
 
-export function deactivate() {}
+export async function deactivate() {
+  // Clean up old metrics on deactivation
+  try {
+    const memoryStore = getMemoryStore();
+    const tokenRetentionDays = vscode.workspace.getConfiguration().get<number>('aiSkeleton.metrics.tokenRetentionDays', 90);
+    const queryRetentionDays = vscode.workspace.getConfiguration().get<number>('aiSkeleton.metrics.queryRetentionDays', 30);
+    
+    const cleaned = await memoryStore.cleanupMetrics(tokenRetentionDays, queryRetentionDays);
+    if (cleaned) {
+      console.log('[Extension] Metrics cleanup completed on deactivation');
+    }
+  } catch (err) {
+    console.error('[Extension] Error during deactivation cleanup:', err);
+  }
+}

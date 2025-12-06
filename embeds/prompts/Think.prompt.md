@@ -55,9 +55,9 @@ Think (Research & Analysis) → Plan (Breakdown & Tasks) → Execute (Implementa
 
 3. **Capture Context**
    - Current system state
-   - Related decisions from #MemoryManagement
-   - Existing patterns from systemPatterns.md
-   - Active blockers from activeContext.md
+   - Related decisions from #MemoryManagement (via aiSkeleton tools)
+   - Existing patterns (via aiSkeleton tools)
+   - Active blockers from memory bank
 
 **Memory Action:**
 ```
@@ -331,7 +331,7 @@ const sqliteEntries = await memoryService.fullTextSearch('SQLite migration');
 - Always query before researching (avoid re-research)
 - Log decisions/patterns immediately (don't defer)
 - Use consistent timestamps (use TimestampHandler)
-- Review `activeContext.md` for current blockers
+- Use `aiSkeleton_showMemory()` for current blockers and context
 
 ---
 
@@ -493,9 +493,9 @@ Before moving to Plan.prompt.md:
 - [ ] Risks are identified with mitigations
 - [ ] Success criteria are defined
 - [ ] Research is saved via `aiSkeleton_*` tools
-- [ ] activeContext.md reflects current state
-- [ ] Relevant patterns added to systemPatterns.md
-- [ ] Decision logged in decisionLog.md
+- [ ] Active context updated in memory bank
+- [ ] Relevant patterns recorded via `aiSkeleton_updatePatterns`
+- [ ] Decision logged via `aiSkeleton_logDecision`
 
 ---
 

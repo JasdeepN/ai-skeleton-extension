@@ -6,6 +6,26 @@
 import * as vscode from 'vscode';
 import { getMemoryService, MemoryFileName } from './memoryService';
 
+// Helper to log tool invocation with token tracking
+async function logToolInvocation(toolName: string, params: any = {}): Promise<void> {
+  try {
+    const middleware = (global as any).__agentCallMiddleware;
+    if (!middleware) {
+      console.debug(`[MemoryTools] No agent middleware available for logging tool: ${toolName}`);
+      return;
+    }
+    
+    // Create a simple message for this tool invocation
+    const toolMessage = `Tool ${toolName} invoked with params: ${JSON.stringify(params).slice(0, 100)}...`;
+    await middleware('memory-tool', `System: Tool invocation tracking`, [
+      { role: 'user', content: toolMessage }
+    ]);
+  } catch (err) {
+    console.debug(`[MemoryTools] Failed to log tool invocation: ${err}`);
+    // Non-fatal - don't block tool execution on middleware errors
+  }
+}
+
 // Tool parameter interfaces
 interface ShowMemoryParams {
   file?: string; // Optional: specific file to read
@@ -57,6 +77,9 @@ export class ShowMemoryTool implements vscode.LanguageModelTool<ShowMemoryParams
     options: vscode.LanguageModelToolInvocationOptions<ShowMemoryParams>,
     _token: vscode.CancellationToken
   ): Promise<vscode.LanguageModelToolResult> {
+    // Log tool invocation for metrics
+    await logToolInvocation('ShowMemory', options.input);
+    
     const service = getMemoryService();
     // Note: file parameter is deprecated, we now use showMemory() which includes all data
     const content = await service.showMemory();
@@ -85,6 +108,9 @@ export class LogDecisionTool implements vscode.LanguageModelTool<LogDecisionPara
     options: vscode.LanguageModelToolInvocationOptions<LogDecisionParams>,
     _token: vscode.CancellationToken
   ): Promise<vscode.LanguageModelToolResult> {
+    // Log tool invocation for metrics
+    await logToolInvocation('LogDecision', options.input);
+    
     const service = getMemoryService();
     const { decision, rationale } = options.input;
 
@@ -122,6 +148,9 @@ export class UpdateContextTool implements vscode.LanguageModelTool<UpdateContext
     options: vscode.LanguageModelToolInvocationOptions<UpdateContextParams>,
     _token: vscode.CancellationToken
   ): Promise<vscode.LanguageModelToolResult> {
+    // Log tool invocation for metrics
+    await logToolInvocation('UpdateContext', options.input);
+    
     const service = getMemoryService();
     const { context } = options.input;
 
@@ -153,6 +182,9 @@ export class UpdateProgressTool implements vscode.LanguageModelTool<UpdateProgre
     options: vscode.LanguageModelToolInvocationOptions<UpdateProgressParams>,
     _token: vscode.CancellationToken
   ): Promise<vscode.LanguageModelToolResult> {
+    // Log tool invocation for metrics
+    await logToolInvocation('UpdateProgress', options.input);
+    
     const service = getMemoryService();
     const { item, status } = options.input;
 
@@ -184,6 +216,9 @@ export class UpdatePatternsTool implements vscode.LanguageModelTool<UpdatePatter
     options: vscode.LanguageModelToolInvocationOptions<UpdatePatternsParams>,
     _token: vscode.CancellationToken
   ): Promise<vscode.LanguageModelToolResult> {
+    // Log tool invocation for metrics
+    await logToolInvocation('UpdatePatterns', options.input);
+    
     const service = getMemoryService();
     const { pattern, description } = options.input;
 
@@ -215,6 +250,9 @@ export class UpdateProjectBriefTool implements vscode.LanguageModelTool<UpdateBr
     options: vscode.LanguageModelToolInvocationOptions<UpdateBriefParams>,
     _token: vscode.CancellationToken
   ): Promise<vscode.LanguageModelToolResult> {
+    // Log tool invocation for metrics
+    await logToolInvocation('UpdateProjectBrief', options.input);
+    
     const service = getMemoryService();
     const success = await service.updateProjectBrief(options.input.content);
     return new vscode.LanguageModelToolResult([
@@ -235,6 +273,9 @@ export class MarkDeprecatedTool implements vscode.LanguageModelTool<MarkDeprecat
     options: vscode.LanguageModelToolInvocationOptions<MarkDeprecatedParams>,
     _token: vscode.CancellationToken
   ): Promise<vscode.LanguageModelToolResult> {
+    // Log tool invocation for metrics
+    await logToolInvocation('MarkDeprecated', options.input);
+    
     const service = getMemoryService();
     const { file, item, reason } = options.input;
 

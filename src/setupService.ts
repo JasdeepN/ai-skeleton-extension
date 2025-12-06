@@ -83,10 +83,10 @@ export async function detectMissingComponents(context: vscode.ExtensionContext):
     components.push({
       id: 'memory',
       label: '$(database) AI-Memory',
-      description: '5 template files',
-      detail: 'Memory management for persistent AI context across sessions',
+      description: 'SQLite database',
+      detail: 'Memory management for persistent AI context across sessions (DB-only, no markdown files)',
       picked: true,
-      fileCount: 5,
+      fileCount: 1,
       targetPath: 'AI-Memory/'
     });
   }
