@@ -29,6 +29,7 @@ jobs:
         run: npm ci
 
       - name: TypeScript Compilation Check
+        shell: bash
         run: |
           echo "::group::TypeScript Compilation"
           if ! npx tsc --noEmit; then
