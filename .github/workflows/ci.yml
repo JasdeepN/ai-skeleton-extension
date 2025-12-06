@@ -328,7 +328,7 @@ jobs:
           fi
 
       - name: Staging Sanity Check - Verify Embeddings
-        if: steps.merge.outputs.merged == 'true'
+        if: steps.merge.outputs.merged == 'true' && steps.merge.outputs.needs_manual != 'true'
         shell: bash
         run: |
           echo "Running sanity check on merged staging code..."
@@ -345,7 +345,7 @@ jobs:
           fi
 
       - name: Verify test results from dev CI
-        if: steps.merge.outputs.merged == 'true'
+        if: steps.merge.outputs.merged == 'true' && steps.merge.outputs.needs_manual != 'true'
         run: |
           if [ ! -d ./test-results ]; then
             echo "::error::Test results artifacts missing from dev CI"
@@ -354,7 +354,7 @@ jobs:
           echo "✅ Test artifacts verified from dev CI build"
 
       - name: Tag pre-release from staging
-        if: steps.merge.outputs.merged == 'true'
+        if: steps.merge.outputs.merged == 'true' && steps.merge.outputs.needs_manual != 'true'
         run: |
           VERSION=${{ steps.version.outputs.version }}
           PRERELEASE_TAG="v${VERSION}-pre"
@@ -368,7 +368,7 @@ jobs:
           echo "✅ Tagged pre-release: $PRERELEASE_TAG"
 
       - name: Create/Update GitHub Pre-release
-        if: steps.merge.outputs.merged == 'true'
+        if: steps.merge.outputs.merged == 'true' && steps.merge.outputs.needs_manual != 'true'
         uses: ncipollo/release-action@v1
         with:
           tag: v${{ steps.version.outputs.version }}-pre

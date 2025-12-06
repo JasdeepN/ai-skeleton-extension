@@ -24,6 +24,12 @@ jobs:
       - name: Validate staging receives only from dev
         if: github.ref == 'refs/heads/staging' || github.base_ref == 'staging'
         run: |
+          # Skip validation for CI workflow automated pushes
+          if [ "${{ github.actor }}" = "github-actions[bot]" ] && [ "${{ github.event_name }}" = "push" ]; then
+            echo "✅ Automated CI workflow push - skipping validation"
+            exit 0
+          fi
+          
           # For PR events, check head branch
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             if [ "${{ github.head_ref }}" != "dev" ]; then
