@@ -245,7 +245,7 @@ export class MemoryBankService {
     try {
       await vscode.workspace.fs.createDirectory(memoryPath);
 
-      // Initialize database
+      // Initialize database (SQLite-only, no markdown files)
       const dbPath = path.join(memoryPath.fsPath, 'memory.db');
       const initialized = await this._store.init(dbPath);
       if (!initialized) {
@@ -255,20 +255,14 @@ export class MemoryBankService {
       // Small delay to ensure database file is written to disk
       await new Promise(resolve => setTimeout(resolve, 100));
 
-      // Create default memory files with initialized content
+      // Add initial entries to database
       const today = this.getToday();
-      const defaultFiles: Record<string, string> = {
-        'projectBrief.md': `# Project Brief\n\n---\n\n[BRIEF:${today}] AI-Memory initialized\n`,
-        'activeContext.md': `# Active Context\n\n---\n\n[CONTEXT:${today}] AI-Memory initialized\n`,
-        'systemPatterns.md': `# System Patterns\n\n---\n\n[PATTERN:${today}] AI-Memory initialized\n`,
-        'decisionLog.md': `# Decision Log\n\n---\n\n[DECISION:${today}] AI-Memory initialized\n`,
-        'progress.md': `# Progress\n\n---\n\n[PROGRESS:${today}] AI-Memory initialized\n`,
-      };
-      
-      for (const [filename, content] of Object.entries(defaultFiles)) {
-        const filePath = vscode.Uri.joinPath(memoryPath, filename);
-        await vscode.workspace.fs.writeFile(filePath, this.encode(content));
-      }
+      await this._store.appendEntry({
+        file_type: 'BRIEF',
+        timestamp: new Date().toISOString(),
+        tag: `BRIEF:${today}`,
+        content: 'AI-Memory initialized'
+      });
 
       await this.detectMemoryBank();
       vscode.window.showInformationMessage(`AI-Memory created at ${memoryPath.fsPath}`);
@@ -303,12 +297,6 @@ export class MemoryBankService {
       });
       this.setActivity('write');
       this._cache.delete('DECISION');  // Invalidate cache
-      
-      // Export to markdown for immediate visibility
-      if (this._state.path) {
-        await exportSQLiteToMarkdown(this._state.path, this._store);
-      }
-      
       return true;
     } catch (err) {
       vscode.window.showErrorMessage(`Failed to log decision: ${err}`);
@@ -339,12 +327,6 @@ export class MemoryBankService {
       });
       this.setActivity('write');
       this._cache.delete('CONTEXT');
-      
-      // Export to markdown for immediate visibility
-      if (this._state.path) {
-        await exportSQLiteToMarkdown(this._state.path, this._store);
-      }
-      
       return true;
     } catch (err) {
       vscode.window.showErrorMessage(`Failed to update context: ${err}`);
@@ -378,12 +360,6 @@ export class MemoryBankService {
       });
       this.setActivity('write');
       this._cache.delete('PROGRESS');
-      
-      // Export to markdown for immediate visibility
-      if (this._state.path) {
-        await exportSQLiteToMarkdown(this._state.path, this._store);
-      }
-      
       return true;
     } catch (err) {
       vscode.window.showErrorMessage(`Failed to update progress: ${err}`);
@@ -415,12 +391,6 @@ export class MemoryBankService {
       });
       this.setActivity('write');
       this._cache.delete('PATTERN');
-      
-      // Export to markdown for immediate visibility
-      if (this._state.path) {
-        await exportSQLiteToMarkdown(this._state.path, this._store);
-      }
-      
       return true;
     } catch (err) {
       vscode.window.showErrorMessage(`Failed to update patterns: ${err}`);

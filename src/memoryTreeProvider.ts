@@ -66,7 +66,7 @@ export class MemoryTreeProvider implements vscode.TreeDataProvider<MemoryTreeIte
           'AI-Memory: INACTIVE',
           vscode.TreeItemCollapsibleState.None,
           undefined,
-          'Click to create'
+          'Run Create Memory Bank command'
         )
       ];
     }

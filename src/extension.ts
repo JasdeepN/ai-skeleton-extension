@@ -941,6 +941,22 @@ export async function activate(context: vscode.ExtensionContext) {
     }
   }));
 
+  // Dump memory to markdown files (user-triggered one-shot export)
+  context.subscriptions.push(vscode.commands.registerCommand('aiSkeleton.memory.dump', async () => {
+    const state = await memoryService.detectMemoryBank();
+    if (!state.active) {
+      vscode.window.showWarningMessage('AI-Memory not active. Create one first.');
+      return;
+    }
+    
+    const success = await memoryService.exportToMarkdown();
+    if (success) {
+      vscode.window.showInformationMessage('Memory dumped to markdown files successfully.');
+    } else {
+      vscode.window.showErrorMessage('Failed to dump memory to markdown.');
+    }
+  }));
+
   // Generic memory update command (accepts context, progress, or pattern updates)
   context.subscriptions.push(vscode.commands.registerCommand('aiSkeleton.memory.update', async (entry?: any) => {
     if (!entry) {

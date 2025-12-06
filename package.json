@@ -112,6 +112,11 @@
         "title": "AI Skeleton: Create Memory Bank"
       },
       {
+        "command": "aiSkeleton.memory.dump",
+        "title": "AI Skeleton: Dump Memory to Markdown",
+        "icon": "$(export)"
+      },
+      {
         "command": "aiSkeleton.memory.show",
         "title": "AI Skeleton: Show Memory Summary"
       },
@@ -450,7 +455,7 @@
           "group": "navigation"
         },
         {
-          "command": "aiSkeleton.memory.create",
+          "command": "aiSkeleton.memory.dump",
           "when": "view == aiSkeletonMemory",
           "group": "navigation"
         }
