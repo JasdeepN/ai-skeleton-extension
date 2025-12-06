@@ -138,10 +138,10 @@ jobs:
           artifacts: vsix/ai-skeleton-extension-*.vsix
 
       - name: Publish to VS Code Marketplace
-        if: secrets.VSCE_PAT != ''
+        if: ${{ env.VSCE_PAT != '' }}
         run: |
           VERSION=${{ steps.final-version.outputs.version }}
-          npx vsce publish --packagePath "vsix/ai-skeleton-extension-${VERSION}.vsix" --pat "${{ secrets.VSCE_PAT }}"
+          npx vsce publish --packagePath "vsix/ai-skeleton-extension-${VERSION}.vsix" --pat "$VSCE_PAT"
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
 
