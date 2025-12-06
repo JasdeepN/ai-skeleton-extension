@@ -98,8 +98,20 @@ jobs:
             Testing and early access version.
             
             **Requirements:**
-            - VS Code >= 1.63.0" \
+            - VS Code >= 1.95.0" \
             --prerelease \
             "$VSIX_FILE"
           
           echo "✅ Created GitHub pre-release v${VERSION}"
+
+      - name: Publish to VS Code Marketplace (Pre-release)
+        if: steps.tag-check.outputs.exists == 'false'
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+        run: |
+          VERSION=${{ steps.current-version.outputs.version }}
+          VSIX_FILE="vsix/ai-skeleton-extension-${VERSION}.vsix"
+          
+          npx @vscode/vsce publish --pre-release --packagePath "$VSIX_FILE"
+          
+          echo "✅ Published pre-release v${VERSION} to VS Code Marketplace"
