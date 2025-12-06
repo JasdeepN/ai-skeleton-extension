@@ -384,15 +384,26 @@ jobs:
       - name: Manual merge notification
         if: steps.merge.outputs.needs_manual == 'true'
         run: |
+          echo "::notice title=Manual Merge Required::Auto-merge to staging blocked. Please resolve conflicts and merge dev to staging manually."
           echo "## ⚠️ Manual Merge Required" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "Auto-merge to staging was blocked by branch protection." >> $GITHUB_STEP_SUMMARY
+          echo "Auto-merge to staging was blocked. Manual intervention needed." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Reason:" >> $GITHUB_STEP_SUMMARY
+          if grep -qi "conflict" push_output.log 2>/dev/null || grep -qi "CONFLICT" merge_output.log 2>/dev/null; then
+            echo "- Merge conflicts detected between dev and staging" >> $GITHUB_STEP_SUMMARY
+          elif grep -qE "protected branch|Required status check|Enforce branch flow|GH006" push_output.log 2>/dev/null; then
+            echo "- Branch protection requires 'Enforce branch flow' status check" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "- Unknown reason (check logs above)" >> $GITHUB_STEP_SUMMARY
+          fi
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Next Steps:" >> $GITHUB_STEP_SUMMARY
           echo '```bash' >> $GITHUB_STEP_SUMMARY
           echo "git checkout staging" >> $GITHUB_STEP_SUMMARY
           echo "git merge dev" >> $GITHUB_STEP_SUMMARY
+          echo "# Resolve any conflicts, then:" >> $GITHUB_STEP_SUMMARY
           echo "git push" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "The Branch Guard workflow will validate the merge." >> $GITHUB_STEP_SUMMARY
+          echo "The Pre-Release workflow will automatically run after successful merge." >> $GITHUB_STEP_SUMMARY
