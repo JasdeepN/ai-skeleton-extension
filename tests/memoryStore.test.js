@@ -263,10 +263,19 @@ describe('MemoryStore', () => {
     });
 
     test('should query by date range', async () => {
+      // Calculate date range based on dynamic test data (now - 2 days to now - 1 day)
+      const now = new Date();
+      const twoDaysAgo = new Date(now.getTime() - 2 * 24 * 60 * 60 * 1000);
+      const yesterday = new Date(now.getTime() - 1 * 24 * 60 * 60 * 1000);
+      
+      // Query for data from 2.5 days ago to 0.5 days ago (should include both decisions)
+      const startDate = new Date(now.getTime() - 2.5 * 24 * 60 * 60 * 1000).toISOString();
+      const endDate = new Date(now.getTime() - 0.5 * 24 * 60 * 60 * 1000).toISOString();
+      
       const result = await store.queryByDateRange(
         'DECISION',
-        '2025-12-02T00:00:00Z',
-        '2025-12-03T23:59:59Z'
+        startDate,
+        endDate
       );
       expect(result.count).toBeGreaterThanOrEqual(1);
     });
