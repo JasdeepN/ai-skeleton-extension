@@ -284,6 +284,20 @@ jobs:
           git push origin "$PRERELEASE_TAG" --force
           echo "✅ Tagged pre-release: $PRERELEASE_TAG"
 
+      - name: Create/Update GitHub Pre-release
+        if: steps.merge.outputs.merged == 'true'
+        uses: ncipollo/release-action@v1
+        with:
+          tag: v${{ steps.version.outputs.version }}-pre
+          name: v${{ steps.version.outputs.version }}-pre
+          prerelease: true
+          draft: false
+          allowUpdates: true
+          artifacts: ./vsix-artifact/*.vsix
+          body: |
+            ## Pre-release v${{ steps.version.outputs.version }}-pre
+            Auto-published from staging merge.
+
       - name: Upload VSIX as pre-release artifact
         if: steps.merge.outputs.merged == 'true'
         uses: actions/upload-artifact@v4

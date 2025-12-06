@@ -105,25 +105,10 @@ jobs:
           npx vsce package --out "vsix/ai-skeleton-extension-${{ steps.final-version.outputs.version }}.vsix"
           echo "✅ VSIX packaged"
 
-      - name: Create/Update latest-stable tag
-        run: |
-          VERSION=${{ steps.final-version.outputs.version }}
-          git config user.name "Release Bot"
-          git config user.email "release@bot.local"
-          
-          # Delete existing tag if present
-          git tag -d latest-stable 2>/dev/null || true
-          git push origin :refs/tags/latest-stable 2>/dev/null || true
-          
-          # Create new tag
-          git tag -a latest-stable -m "Release v$VERSION"
-          git push origin latest-stable
-          echo "✅ Tagged as latest-stable"
-
       - name: Create GitHub Release
         uses: ncipollo/release-action@v1
         with:
-          tag: latest-stable
+          tag: v${{ steps.final-version.outputs.version }}
           name: v${{ steps.final-version.outputs.version }}
           body: |
             ## Release v${{ steps.final-version.outputs.version }}
