@@ -5,12 +5,6 @@ on:
     types: [closed]
     branches: [release]
   workflow_dispatch:
-    inputs:
-      skip_version_bump:
-        description: 'Skip automatic version bump (use current version)'
-        required: false
-        default: 'false'
-        type: boolean
 
 permissions:
   contents: write
@@ -39,9 +33,6 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
 
-      - name: Install dependencies
-        run: npm ci
-
       - name: Get current version
         id: current-version
         run: |
@@ -49,45 +40,39 @@ jobs:
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "📦 Current version: $VERSION"
 
-      - name: Check version status
-        id: version-check
+      - name: Strip pre-release suffix if present
+        id: clean-version
         run: |
-          CURRENT_VERSION=${{ steps.current-version.outputs.version }}
-          echo "current_version=$CURRENT_VERSION" >> $GITHUB_OUTPUT
+          VERSION=${{ steps.current-version.outputs.version }}
+          # Remove -pre.X suffix if present
+          CLEAN_VERSION=$(echo "$VERSION" | sed 's/-pre\.[0-9]*$//')
           
-          # Get the last released version from latest-stable tag
-          LAST_RELEASED=""
-          if git rev-parse latest-stable >/dev/null 2>&1; then
-            LAST_RELEASED=$(git show latest-stable:package.json 2>/dev/null | jq -r '.version' || echo "")
-          fi
-          echo "last_released=$LAST_RELEASED" >> $GITHUB_OUTPUT
-          
-          # Check if version was manually bumped
-          if [ -n "$LAST_RELEASED" ] && [ "$CURRENT_VERSION" != "$LAST_RELEASED" ]; then
-            echo "version_changed=true" >> $GITHUB_OUTPUT
-            echo "✅ Version manually changed: $LAST_RELEASED → $CURRENT_VERSION"
+          if [ "$VERSION" != "$CLEAN_VERSION" ]; then
+            echo "cleaned=true" >> $GITHUB_OUTPUT
+            echo "clean_version=$CLEAN_VERSION" >> $GITHUB_OUTPUT
+            echo "ℹ️ Cleaning version: $VERSION → $CLEAN_VERSION"
           else
-            echo "version_changed=false" >> $GITHUB_OUTPUT
-            echo "ℹ️ Version unchanged: $CURRENT_VERSION"
+            echo "cleaned=false" >> $GITHUB_OUTPUT
+            echo "clean_version=$VERSION" >> $GITHUB_OUTPUT
+            echo "✅ Version already clean: $VERSION"
           fi
 
-      - name: Auto-bump version (if not manually changed)
-        id: bump
-        if: steps.version-check.outputs.version_changed == 'false' && github.event.inputs.skip_version_bump != 'true'
+      - name: Update version to stable
+        if: steps.clean-version.outputs.cleaned == 'true'
         run: |
+          CLEAN_VERSION=${{ steps.clean-version.outputs.clean_version }}
+          
+          # Update package.json with clean version
+          jq ".version = \"$CLEAN_VERSION\"" package.json > package.json.tmp
+          mv package.json.tmp package.json
+          
           git config user.name "Release Bot"
           git config user.email "release@bot.local"
-          
-          # Bump patch version
-          npm version patch --no-git-tag-version
-          NEW_VERSION=$(jq -r '.version' package.json)
-          
-          git add package.json package-lock.json
-          git commit -m "chore: bump version to $NEW_VERSION [skip ci]"
+          git add package.json
+          git commit -m "chore: release version $CLEAN_VERSION [skip ci]"
           git push origin release
           
-          echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
-          echo "✅ Auto-bumped version to $NEW_VERSION"
+          echo "✅ Updated to stable version $CLEAN_VERSION"
 
       - name: Get final version
         id: final-version
@@ -96,102 +81,99 @@ jobs:
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "📦 Release version: $VERSION"
 
-      - name: Detect existing version tag
-        id: tag-exists
+      - name: Check for existing release tag
+        id: tag-check
         run: |
           VERSION=${{ steps.final-version.outputs.version }}
           git fetch --tags --prune --prune-tags
+          
           if git rev-parse "refs/tags/v${VERSION}" >/dev/null 2>&1; then
-            TAG_SHA=$(git rev-parse "refs/tags/v${VERSION}")
             echo "exists=true" >> $GITHUB_OUTPUT
-            echo "tag_sha=$TAG_SHA" >> $GITHUB_OUTPUT
-            echo "⚠️ Tag v${VERSION} already exists at $TAG_SHA"
+            echo "⚠️ Tag v${VERSION} already exists"
           else
             echo "exists=false" >> $GITHUB_OUTPUT
-            echo "tag_sha=" >> $GITHUB_OUTPUT
-            echo "✅ No existing tag found for v${VERSION}"
+            echo "✅ Creating new tag v${VERSION}"
           fi
 
-      - name: Compile TypeScript (fast, staging already validated)
-        run: npm run compile
-
-      - name: Package VSIX
-        run: |
-          mkdir -p vsix
-          npx vsce package --out "vsix/ai-skeleton-extension-${{ steps.final-version.outputs.version }}.vsix"
-          echo "✅ VSIX packaged"
-
-      - name: Create GitHub Release
-        uses: ncipollo/release-action@v1
-        with:
-          tag: v${{ steps.final-version.outputs.version }}
-          name: v${{ steps.final-version.outputs.version }}
-          body: |
-            ## Release v${{ steps.final-version.outputs.version }}
-            
-            This is a stable release of AI Skeleton Extension.
-            
-            ### Installation
-            Download the `.vsix` file and install via VS Code Extensions panel,
-            or install directly from the VS Code Marketplace.
-            
-            ### Changes
-            See commit history for detailed changes.
-          draft: false
-          prerelease: false
-          allowUpdates: true
-          artifacts: vsix/ai-skeleton-extension-*.vsix
-
-      - name: Tag release version
-        if: steps.tag-exists.outputs.exists == 'false'
+      - name: Download pre-release VSIX
+        id: download-vsix
         run: |
           VERSION=${{ steps.final-version.outputs.version }}
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
+          PRE_TAG="v${VERSION}-pre"
           
-          # Create version tag
+          # Try to download VSIX from pre-release
+          if gh release view "$PRE_TAG" >/dev/null 2>&1; then
+            echo "ℹ️ Found pre-release $PRE_TAG, downloading VSIX..."
+            mkdir -p vsix
+            gh release download "$PRE_TAG" --pattern "*.vsix" --dir vsix
+            echo "source=prerelease" >> $GITHUB_OUTPUT
+            echo "✅ Downloaded VSIX from pre-release"
+          else
+            echo "source=build" >> $GITHUB_OUTPUT
+            echo "⚠️ No pre-release found, will build VSIX"
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build VSIX if not downloaded
+        if: steps.download-vsix.outputs.source == 'build'
+        run: |
+          npm ci
+          npm run compile
+          mkdir -p vsix
+          npx @vscode/vsce package --out vsix/ai-skeleton-extension-${{ steps.final-version.outputs.version }}.vsix
+          echo "✅ Built VSIX package"
+
+      - name: Create stable release tag
+        if: steps.tag-check.outputs.exists == 'false'
+        run: |
+          VERSION=${{ steps.final-version.outputs.version }}
+          git config user.name "Release Bot"
+          git config user.email "release@bot.local"
+          
           git tag -a "v${VERSION}" -m "Release v${VERSION}"
           git push origin "v${VERSION}"
           
-          # Update latest-stable tag
-          git tag -f latest-stable -m "Latest stable release: v${VERSION}"
-          git push origin latest-stable --force
+          # Update latest-stable tracking tag
+          git tag -f latest-stable
+          git push -f origin latest-stable
           
-          echo "✅ Tagged v${VERSION} as release"
+          echo "✅ Tagged v${VERSION} as stable release"
 
-      - name: Reuse existing tag and update latest-stable
-        if: steps.tag-exists.outputs.exists == 'true'
+      - name: Create GitHub stable release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           VERSION=${{ steps.final-version.outputs.version }}
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-
-          git fetch --tags --prune --prune-tags
-          # Point latest-stable to the existing version tag
-          git tag -f latest-stable "v${VERSION}"
-          git push origin latest-stable --force
-
-          echo "✅ Reused existing v${VERSION} tag (no retag); latest-stable updated"
+          VSIX_FILE="vsix/ai-skeleton-extension-${VERSION}.vsix"
+          
+          # Create or update stable release
+          gh release create "v${VERSION}" \
+            --title "Release v${VERSION}" \
+            --notes "🎉 Stable release v${VERSION}" \
+            --latest \
+            "$VSIX_FILE" || \
+          gh release upload "v${VERSION}" "$VSIX_FILE" --clobber
+          
+          echo "✅ Created/updated GitHub release v${VERSION}"
 
       - name: Publish to VS Code Marketplace
         if: ${{ env.VSCE_PAT != '' }}
         run: |
           VERSION=${{ steps.final-version.outputs.version }}
-          npx vsce publish --packagePath "vsix/ai-skeleton-extension-${VERSION}.vsix" --pat "$VSCE_PAT"
+          npx @vscode/vsce publish --packagePath "vsix/ai-skeleton-extension-${VERSION}.vsix" --pat "$VSCE_PAT"
+          echo "✅ Published to VS Code Marketplace"
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
 
-      - name: Sync release back to staging
+      - name: Publish to VS Code Marketplace
+        if: ${{ env.VSCE_PAT != '' }}
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          
-          # Update staging to match release
-          git checkout staging
-          git reset --hard origin/release
-          git push origin staging --force
-          
-          echo "✅ Synced release → staging"
+          VERSION=${{ steps.final-version.outputs.version }}
+          npx @vscode/vsce publish --packagePath "vsix/ai-skeleton-extension-${VERSION}.vsix" --pat "$VSCE_PAT"
+          echo "✅ Published to VS Code Marketplace"
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
 
       - name: Summary
         run: |
@@ -200,6 +182,7 @@ jobs:
           echo "**Version:** v${{ steps.final-version.outputs.version }}" >> $GITHUB_STEP_SUMMARY
           echo "**Tag:** latest-stable" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Artifacts" >> $GITHUB_STEP_SUMMARY
-          echo "- VSIX package uploaded to GitHub Release" >> $GITHUB_STEP_SUMMARY
-          echo "- Published to VS Code Marketplace" >> $GITHUB_STEP_SUMMARY
+          echo "### Published To" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ GitHub Release" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ VS Code Marketplace" >> $GITHUB_STEP_SUMMARY
+

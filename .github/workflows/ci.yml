@@ -2,9 +2,9 @@ name: CI Pipeline
 
 on:
   push:
-    branches: [dev, staging]
+    branches: [dev]
   pull_request:
-    branches: [dev, staging, release]
+    branches: [dev]
   workflow_dispatch:
 
 permissions:
@@ -60,7 +60,7 @@ jobs:
   build-and-test:
     name: Build & Test (${{ matrix.os }}, Node ${{ matrix.node }})
     needs: changes
-    if: needs.changes.outputs.code == 'true' && (github.ref != 'refs/heads/staging' || github.event_name == 'pull_request')
+    if: needs.changes.outputs.code == 'true'
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
