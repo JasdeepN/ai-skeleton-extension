@@ -32,18 +32,35 @@ jobs:
             fi
           fi
           
-          # For push events (merges), verify commits exist in dev
+          # For push events, verify commits originated from dev
           if [ "${{ github.event_name }}" = "push" ]; then
             git fetch origin dev --no-tags 2>/dev/null || true
             
             BEFORE="${{ github.event.before }}"
             AFTER="${{ github.sha }}"
             
-            # Check each pushed commit exists in origin/dev
-            for commit in $(git rev-list $BEFORE..$AFTER 2>/dev/null || echo ""); do
-              if ! git merge-base --is-ancestor "$commit" origin/dev 2>/dev/null; then
-                echo "ERROR: Commit $commit is not from dev branch."
-                exit 1
+            # Get commits being pushed
+            COMMITS=$(git rev-list $BEFORE..$AFTER 2>/dev/null || echo "")
+            
+            for commit in $COMMITS; do
+              # Skip merge commits - check their parents instead
+              if git rev-parse --verify "${commit}^2" >/dev/null 2>&1; then
+                echo "ℹ️  Skipping merge commit $commit - validating parents"
+                
+                # For merge commits, verify at least one parent is from dev
+                PARENT1=$(git rev-parse "${commit}^1")
+                PARENT2=$(git rev-parse "${commit}^2")
+                
+                if ! git merge-base --is-ancestor "$PARENT2" origin/dev 2>/dev/null; then
+                  echo "ERROR: Merge commit $commit does not merge from dev branch."
+                  exit 1
+                fi
+              else
+                # Regular commit - must exist in dev
+                if ! git merge-base --is-ancestor "$commit" origin/dev 2>/dev/null; then
+                  echo "ERROR: Commit $commit is not from dev branch."
+                  exit 1
+                fi
               fi
             done
           fi
