@@ -263,10 +263,15 @@ describe('MemoryStore', () => {
     });
 
     test('should query by date range', async () => {
+      // Calculate dates relative to the test data (now -2 days to now -1 day)
+      const now = new Date();
+      const twoDaysAgo = new Date(now.getTime() - 2 * 24 * 60 * 60 * 1000);
+      const tomorrow = new Date(now.getTime() + 1 * 24 * 60 * 60 * 1000);
+      
       const result = await store.queryByDateRange(
         'DECISION',
-        '2025-12-02T00:00:00Z',
-        '2025-12-03T23:59:59Z'
+        twoDaysAgo.toISOString(),
+        tomorrow.toISOString()
       );
       expect(result.count).toBeGreaterThanOrEqual(1);
     });
