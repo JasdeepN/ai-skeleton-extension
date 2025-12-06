@@ -139,19 +139,19 @@ jobs:
 
       - name: Verify VSIX package
         run: |
-          if [ ! -f *.vsix ]; then
+          # Find the main extension VSIX (not prompts)
+          VSIX_FILE=$(ls ai-skeleton-extension-*.vsix 2>/dev/null | head -1)
+          if [ -z "$VSIX_FILE" ]; then
             echo "::error::VSIX file not found!"
             exit 1
           fi
-          VSIX_FILE=$(ls *.vsix)
-          echo "✅ VSIX package verified: $VSIX_FILE"
-          echo "VSIX_FILE=$VSIX_FILE" >> $GITHUB_ENV
+          echo "✅ VSIX package found: $VSIX_FILE"
           
           # Basic integrity check
-          unzip -t "$VSIX_FILE" > /dev/null 2>&1 || {
+          if ! unzip -t "$VSIX_FILE" > /dev/null 2>&1; then
             echo "::error::VSIX archive is corrupted"
             exit 1
-          }
+          fi
           echo "✅ VSIX integrity verified"
 
   # ============================================
