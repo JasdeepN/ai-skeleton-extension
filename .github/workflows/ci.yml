@@ -32,21 +32,25 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Filter paths
+      - name: Detect changes vs origin/dev
         id: filter
-        uses: dorny/paths-filter@v3
-        with:
-          filters: |
-            code:
-              - 'src/**'
-              - 'scripts/**'
-              - 'resources/**'
-              - 'embeds/**'
-              - 'package*.json'
-              - 'tsconfig*.json'
-              - 'jest.config.*'
-              - '.github/workflows/**'
-              - 'vsix/last-version.json'
+        run: |
+          git fetch origin dev --no-tags
+          
+          # Compare incoming commits vs origin/dev
+          CHANGED_FILES=$(git diff --name-only origin/dev...HEAD 2>/dev/null || echo "")
+          
+          # Check if any code files changed
+          CODE_CHANGED=false
+          for file in $CHANGED_FILES; do
+            if [[ $file =~ ^(src/|scripts/|resources/|embeds/|package|tsconfig|jest.config|\.github/workflows/) ]]; then
+              CODE_CHANGED=true
+              break
+            fi
+          done
+          
+          echo "code=$CODE_CHANGED" >> $GITHUB_OUTPUT
+          echo "Changed files: $CHANGED_FILES"
 
   # ============================================
   # Stage 1: Build & Test (runs on all platforms)
@@ -271,7 +275,7 @@ jobs:
             fi
             git commit -m "chore: merge dev → staging [$(date +'%Y-%m-%d')]"
           fi
-          
+                    
           git push origin staging
           echo "merged=true" >> $GITHUB_OUTPUT
           echo "✅ Successfully merged dev to staging"
