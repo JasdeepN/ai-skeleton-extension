@@ -153,3 +153,7 @@
 [PROGRESS:2025-12-06] Done: - [x] Release v0.2.0 staged and committed with git tag
 
 [PROGRESS:2025-12-06] Done: - [x] CI Tests fixed and passing - all 7 jobs successful (6 platform tests + smoke test)
+
+[PROGRESS:2025-12-06] Done: - [x] v0.2.0 successfully published to VS Code Marketplace via latest-stable release
+
+[PROGRESS:2025-12-06] Done: - [x] Remove all markdown file-based memory logic and ensure DB-only persistence
