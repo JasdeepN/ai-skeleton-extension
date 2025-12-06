@@ -50,22 +50,6 @@ jobs:
           echo "version=$RELEASE_VERSION" >> $GITHUB_OUTPUT
           echo "📦 Release version: $RELEASE_VERSION (incremented from ${CURRENT_VERSION})"
 
-      - name: Update version for release
-        run: |
-          RELEASE_VERSION=${{ steps.release-version.outputs.version }}
-          
-          # Update package.json with release version
-          jq ".version = \"$RELEASE_VERSION\"" package.json > package.json.tmp
-          mv package.json.tmp package.json
-          
-          git config user.name "Release Bot"
-          git config user.email "release@bot.local"
-          git add package.json
-          git commit -m "chore: release version $RELEASE_VERSION [skip ci]"
-          git push origin release
-          
-          echo "✅ Updated to release version $RELEASE_VERSION"
-
       - name: Check for existing release tag
         id: tag-check
         run: |
