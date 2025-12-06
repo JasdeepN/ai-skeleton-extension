@@ -1,0 +1,24 @@
+name: Branch Guard
+
+on:
+  pull_request:
+    branches:
+      - release
+      - staging
+
+jobs:
+  check_branch:
+    name: Enforce PR source for release/staging
+    runs-on: ubuntu-latest
+    steps:
+      - name: Block release unless from staging
+        if: github.base_ref == 'release' && github.head_ref != 'staging'
+        run: |
+          echo "ERROR: Only PRs from 'staging' may be merged into 'release'."
+          exit 1
+
+      - name: Block staging unless from dev
+        if: github.base_ref == 'staging' && github.head_ref != 'dev'
+        run: |
+          echo "ERROR: Only PRs from 'dev' may be merged into 'staging'."
+          exit 1
