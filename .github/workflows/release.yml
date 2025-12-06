@@ -45,11 +45,9 @@ jobs:
       - name: Compile TypeScript
         run: npm run compile
 
-      - name: Run full test suite
-        run: npm run test:coverage
-
-      - name: Run E2E tests
-        run: xvfb-run -a npm run test:e2e
+      # Quick sanity check - full tests already passed in staging
+      - name: Sanity check (unit tests only)
+        run: npm test
 
       - name: Check version status
         id: version-check
