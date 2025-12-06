@@ -57,7 +57,8 @@ export class MemoryTreeProvider implements vscode.TreeDataProvider<MemoryTreeIte
     }
 
     // Root level - show AI-Memory status and files
-    const state = await this.memoryService.detectMemoryBank();
+    // Use cached state instead of re-detecting on every refresh
+    const state = this.memoryService.state;
 
     if (!state.active || !state.path) {
       // AI-Memory not found
