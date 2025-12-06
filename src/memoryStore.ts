@@ -35,27 +35,7 @@ export interface QueryMetric {
 }
 
 // Mapping from uppercase tags to filenames
-export const FILE_TYPE_TO_FILENAME: Record<MemoryEntry['file_type'], string> = {
-  CONTEXT: 'activeContext.md',
-  DECISION: 'decisionLog.md',
-  PROGRESS: 'progress.md',
-  PATTERN: 'systemPatterns.md',
-  BRIEF: 'projectBrief.md'
-};
-
-// Reverse mapping from filenames to uppercase tags
-export const FILENAME_TO_FILE_TYPE: Record<string, MemoryEntry['file_type']> = {
-  'activeContext.md': 'CONTEXT',
-  'activeContext': 'CONTEXT',
-  'decisionLog.md': 'DECISION',
-  'decisionLog': 'DECISION',
-  'progress.md': 'PROGRESS',
-  'progress': 'PROGRESS',
-  'systemPatterns.md': 'PATTERN',
-  'systemPatterns': 'PATTERN',
-  'projectBrief.md': 'BRIEF',
-  'projectBrief': 'BRIEF'
-};
+// File-based memory is deprecated; all operations are now database-backed only.
 
 export interface QueryResult {
   entries: MemoryEntry[];
@@ -771,6 +751,74 @@ export class MemoryStore {
    */
   getBackend(): DatabaseBackend {
     return this.backend;
+  }
+
+  /**
+   * Execute raw SQL - for schema migrations only
+   * @internal Use with caution!
+   */
+  execRaw(sql: string): void {
+    if (!this.db) {
+      throw new Error('Database not initialized');
+    }
+
+    if (this.backend === 'better-sqlite3') {
+      this.db.exec(sql);
+    } else if (this.backend === 'sql.js') {
+      this.db.run(sql);
+    } else {
+      throw new Error('Invalid backend for execRaw');
+    }
+  }
+
+  /**
+   * Execute SQL query and return results - for schema migrations only
+   * @internal Use with caution!
+   */
+  queryRaw(sql: string): any[] {
+    if (!this.db) {
+      throw new Error('Database not initialized');
+    }
+
+    if (this.backend === 'better-sqlite3') {
+      return this.db.prepare(sql).all();
+    } else if (this.backend === 'sql.js') {
+      const result = this.db.exec(sql);
+      if (result.length === 0) return [];
+      
+      // Convert sql.js result format to array of objects
+      const columns = result[0].columns;
+      const values = result[0].values;
+      return values.map((row: any[]) => {
+        const obj: any = {};
+        columns.forEach((col: string, idx: number) => {
+          obj[col] = row[idx];
+        });
+        return obj;
+      });
+    } else {
+      throw new Error('Invalid backend for queryRaw');
+    }
+  }
+
+  /**
+   * Create database transaction (better-sqlite3 only)
+   * For sql.js, operations are auto-saved
+   */
+  transaction(fn: () => void): void {
+    if (!this.db) {
+      throw new Error('Database not initialized');
+    }
+
+    if (this.backend === 'better-sqlite3') {
+      const tx = this.db.transaction(fn);
+      tx();
+    } else {
+      // sql.js doesn't have transactions, just execute
+      fn();
+      // Auto-save after operations
+      this.persistSqlJs();
+    }
   }
 
   /**

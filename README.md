@@ -5,6 +5,34 @@
 
 **Complete AI agent toolkit for VS Code**: Native memory management, workflow prompts, MCP integration, and agent definitions.
 
+---
+
+## 🚨 v0.2.0 (Beta) Release Notes
+
+- **AI-Memory is now fully database-backed (SQLite)**
+  - All memory operations use the database; markdown file persistence is removed
+  - No fallbacks to .md files; legacy files are auto-migrated to `.backup` on upgrade
+- **Schema migration system**
+  - Automatic backup and migration for upgrades (see `memorySchemaManager.ts`)
+  - New tables: `token_metrics`, `query_metrics`, and `schema_version` for metrics and versioning
+- **Metrics Collection Pipeline**
+  - Tracks token usage, query performance, and context budget
+  - Real-time status bar and dashboard integration
+  - Retention policy: metrics auto-cleaned after 90/30 days
+- **Smart Context Management**
+  - Relevance-based context selection for agents
+  - Encoding optimization: Markdown + YAML for maximum token efficiency
+- **Release Workflow Overhaul**
+  - Permanent `dev` and `release` branches; PR-gated releases only
+  - Marketplace publishing only from `release` branch after full test suite
+  - Automated versioning and artifact handling
+- **Critical Patch Workflow**
+  - Emergency fixes can be published via critical-patch workflow
+- **Comprehensive Testing**
+  - 180+ unit/integration tests; CI matrix covers all platforms
+
+---
+
 ## 🎯 Purpose
 
 This extension extends **Copilot agent** context and memory capabilities by providing:
@@ -73,8 +101,7 @@ In Copilot chat, type `#` and you should see the memory tools appear in the pick
 
 Switch to agent mode in Copilot and select the Memory & Deep Thinking agent from `.github/agents/`.
 
-
-
+---
 
 ## 📦 Features
 
@@ -106,16 +133,16 @@ aiSkeleton_updateProgress({
 })
 ```
 
-### 2. Memory Bank Structure
+### 2. Memory Bank Structure (v0.2.0+)
 
 ```
 AI-Memory/
-├── activeContext.md      # Current work focus
-├── decisionLog.md        # Architectural decisions
-├── progress.md           # Task tracking (done/doing/next)
-├── systemPatterns.md     # Code patterns/conventions
-└── projectBrief.md       # Project goals/context
+├── memory.db              # SQLite database (all memory entries)
+├── .backup/               # Legacy markdown files and DB backups
 ```
+
+- All memory entries are stored in `memory.db` (no markdown file persistence)
+- `.backup/` contains legacy files and auto-created DB backups for migration safety
 
 ### 3. Workflow Prompts
 
@@ -140,10 +167,27 @@ Pre-configured agent mode (`memory-deep-think.agent.md`) with:
 
 ### 5. Visual Interface
 
-- **Memory Bank Tree View**: Visual browser for `AI-Memory/` files in Explorer
+- **Memory Bank Tree View**: Visual browser for database-backed memory in Explorer
 - **AI Skeleton Prompts Tree View**: Browse and interact with embedded prompts
 - **Memory Status Bar**: Shows ACTIVE/INACTIVE status; click to create or view
 - **Commands & Tools**: Both manual commands and agent-invokable tools available
+- **Activity Bar Dashboard**: Shows DB status, metrics, entry counts, and tasks
+
+### 6. Metrics & Context Management
+
+- **Token Metrics**: Tracks token usage per agent call
+- **Query Metrics**: Tracks query performance and latency
+- **Context Budget**: Real-time status bar and dashboard display
+- **Smart Context Selection**: Agents select most relevant entries within token budget
+- **Retention Policy**: Metrics auto-cleaned after 90/30 days
+
+### 7. Release Workflow (v0.2.0+)
+
+- **Permanent dev/release branch model**
+- **PR-gated releases**: Only PR merges to `release` branch trigger marketplace publish
+- **Critical Patch Workflow**: Emergency fixes via critical-patch.yml
+- **Automated versioning and artifact handling**
+- **Comprehensive CI/CD**: All platforms, full test suite, coverage upload
 
 ## 🛠️ Usage
 
@@ -152,7 +196,7 @@ Pre-configured agent mode (`memory-deep-think.agent.md`) with:
 1. Open Command Palette (`Ctrl+Shift+P`)
 2. Run: `AI Skeleton: Create Memory Bank`
 3. Select workspace folder
-4. Memory bank files created in `AI-Memory/`
+4. Memory bank database created in `AI-Memory/`
 
 ### Installing Prompts & Agents
 
@@ -241,7 +285,7 @@ For production VSIX distribution, you would need:
 2. Request proposed API access from Microsoft
 3. Get publisher ID allowlisted
 
-Or, use the file-based approach (agents read/write memory files directly via MCP filesystem tool).
+Or, use the file-based approach (agents read/write memory files directly via MCP filesystem tool). **(Deprecated in v0.2.0+)**
 
 ### How do I know if tools are available?
 
@@ -280,7 +324,12 @@ ai-skeleton-extension/
 │   ├── memoryService.ts       # Core memory operations
 │   ├── promptStore.ts         # Embedded prompts (auto-generated)
 │   ├── agentStore.ts          # Embedded agents (auto-generated)
-│   └── mcpStore.ts            # MCP configurations
+│   ├── mcpStore.ts            # MCP configurations
+│   ├── memorySchemaManager.ts # Schema migration manager (v0.2.0+)
+│   ├── metricsService.ts      # Metrics aggregator (v0.2.0+)
+│   ├── relevanceScorer.ts     # Smart context selection (v0.2.0+)
+│   ├── tokenCounterService.ts # Token counting (v0.2.0+)
+│   └── ...existing files
 ├── agents/
 │   └── memory-deep-think.agent.md  # Agent definition (source)
 ├── prompts/
@@ -298,9 +347,11 @@ ai-skeleton-extension/
 ## 📖 Documentation
 
 - **[INSTALLATION.md](./INSTALLATION.md)** - Setup guide and troubleshooting
-- **[LANGUAGE_MODEL_TOOLS_FIX.md](./LANGUAGE_MODEL_TOOLS_FIX.md)** - Technical details on LM Tools API
-- **[ARCHITECTURE_v0.1.3.md](./ARCHITECTURE_v0.1.3.md)** - Command-based architecture attempt (deprecated)
-- **[memory-bank/decisionLog.md](../../memory-bank/decisionLog.md)** - Full decision history
+- **[SQLITEIMPLEMENTATION.md](./SQLITEIMPLEMENTATION.md)** - Technical details on DB-only memory
+- **[CHANGELOG.md](./CHANGELOG.md)** - Release history
+- **[BRANCH_PROTECTION_SETUP.md](./BRANCH_PROTECTION_SETUP.md)** - Release workflow and branch protection
+- **[CODECOV_FIX.md](./CODECOV_FIX.md)** - CI coverage upload details
+- **[QUICKSTART.md](./QUICKSTART.md)** - Fast setup guide
 
 ## 🧪 Testing
 
@@ -310,6 +361,7 @@ Quick CLI checks:
 npm install
 npm run build  # Full build with asset embedding
 npm run verify # Verify embedded prompts
+npm run test   # Full test suite (180+ tests)
 ```
 
 Manual interactive tests (in VS Code):
@@ -323,9 +375,10 @@ Manual interactive tests (in VS Code):
    - Create Memory Bank → Log Decision → Show Summary
    - Test agent integration with Copilot chat
 
-## 📝 Memory Management Rules (Enforced)
+## 📝 Memory Management Rules (v0.2.0+)
 
-- **Never delete** from memory files - only append new entries
+- **No markdown file persistence**: All memory is stored in `memory.db` (SQLite)
+- **Never delete** from memory entries - only append new entries
 - **Tag all entries** with `[TYPE:YYYY-MM-DD]` format for efficient scanning
 - **Timestamp everything** automatically
 - **Read selectively**: Use tags/timestamps to scan only recent/relevant entries
@@ -342,4 +395,4 @@ Built for agent-assisted development workflows. Uses VS Code's Language Model To
 
 **Marketplace**: [JasdeepN.ai-skeleton-extension](https://marketplace.visualstudio.com/items?itemName=JasdeepN.ai-skeleton-extension)  
 **Install**: `code --install-extension JasdeepN.ai-skeleton-extension`  
-**Status**: Production-ready on VS Code 1.95+
+**Status**: v0.2.0 (Beta) - DB-only memory, metrics, and release workflow overhaul

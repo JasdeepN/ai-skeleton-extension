@@ -116,6 +116,7 @@ export async function migrateMarkdownToSQLite(
   };
 
   const memoryFiles = [
+    // Markdown files are deprecated; only used for backup during migration
     'activeContext.md',
     'decisionLog.md',
     'progress.md',
@@ -127,7 +128,6 @@ export async function migrateMarkdownToSQLite(
   try {
     const backupFolder = vscode.Uri.joinPath(memoryPath, '.backup');
     await vscode.workspace.fs.createDirectory(backupFolder);
-
     for (const file of memoryFiles) {
       const filePath = vscode.Uri.joinPath(memoryPath, file);
       const backupPath = vscode.Uri.joinPath(backupFolder, `${file}.backup`);
@@ -138,82 +138,16 @@ export async function migrateMarkdownToSQLite(
         // File may not exist, skip
       }
     }
-
     result.backupPath = backupFolder.fsPath;
   } catch (err) {
     result.errors.push(`Backup failed: ${err}`);
   }
 
   // Read and migrate each markdown file
-  const seenEntries = new Set<string>(); // Deduplicate
-
-  for (const file of memoryFiles) {
-    const filePath = vscode.Uri.joinPath(memoryPath, file);
-
-    try {
-      const content = await vscode.workspace.fs.readFile(filePath);
-      const text = Buffer.from(content).toString('utf8');
-      const entries = parseMarkdownFile(text);
-
-      for (const entry of entries) {
-        // Deduplicate by content hash
-        const entryHash = `${entry.file_type}:${entry.tag}:${entry.content.substring(0, 50)}`;
-        if (seenEntries.has(entryHash)) {
-          result.entriesSkipped++;
-          continue;
-        }
-        seenEntries.add(entryHash);
-
-        const inserted = await store.appendEntry(entry);
-        if (inserted) {
-          result.entriesCreated++;
-        } else {
-          result.entriesSkipped++;
-        }
-      }
-    } catch (err) {
-      result.errors.push(`Failed to migrate ${file}: ${err}`);
-    }
-  }
-
-  result.success = result.entriesCreated > 0 && result.errors.length === 0;
+  // Migration from markdown files is deprecated; only backup is performed. No migration to DB from files.
+  result.success = result.errors.length === 0;
   return result;
 }
 
 /**
- * Check if migration is needed
- * Returns true if markdown files exist but SQLite is empty
- */
-export async function isMigrationNeeded(
-  memoryPath: vscode.Uri,
-  store: MemoryStore
-): Promise<boolean> {
-  // Check if markdown files exist
-  let markdownExists = false;
-  const memoryFiles = [
-    'activeContext.md',
-    'decisionLog.md',
-    'progress.md',
-    'systemPatterns.md',
-    'projectBrief.md'
-  ];
-
-  for (const file of memoryFiles) {
-    try {
-      const filePath = vscode.Uri.joinPath(memoryPath, file);
-      await vscode.workspace.fs.stat(filePath);
-      markdownExists = true;
-      break;
-    } catch {
-      // File doesn't exist
-    }
-  }
-
-  if (!markdownExists) {
-    return false;
-  }
-
-  // Check if SQLite has entries
-  const result = await store.queryByType('CONTEXT', 1);
-  return result.count === 0;
-}
+// Migration from markdown files is deprecated; only backup is performed. No migration to DB from files.

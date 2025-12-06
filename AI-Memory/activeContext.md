@@ -295,3 +295,7 @@ BUILD & TESTS: ✅ CLEAN
 - All new code paths verified working
 
 NEXT STEPS: Ready for production - all metrics collection, analysis, display, and retention functionality complete and tested.
+
+[CONTEXT:2025-12-06] MIGRATION SYSTEM COMPLETE - Database schema migration system implemented and tested successfully. Created memorySchemaManager.ts with versioned migrations, automatic backup creation, and user prompts. Migration applied manually to local database: 189 existing entries preserved, schema_version + token_metrics + query_metrics tables created with proper indexes. System integrates into memoryService.detectMemoryBank() to auto-check and prompt for migrations on extension activation. Ready for v0.2.1 release.
+
+[CONTEXT:2025-12-06] All markdown file-based memory logic has been removed. The codebase now uses database-backed persistence exclusively for AI-Memory. No fallbacks or file writes/reads for memory data remain. All .md files have been moved to .backup after migration. All tests pass and DB-only persistence is validated.

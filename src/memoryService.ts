@@ -5,6 +5,7 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
 import { getMemoryStore, MemoryStore, MemoryEntry as StoreMemoryEntry } from './memoryStore';
+import { checkAndPromptMigration } from './memorySchemaManager';
 
 export interface MemoryBankState {
   active: boolean;
@@ -44,14 +45,7 @@ export interface DashboardMetrics {
 }
 
 const MEMORY_FILES = [
-  'activeContext.md',
-  'decisionLog.md',
-  'progress.md',
-  'systemPatterns.md',
-  'projectBrief.md'
-] as const;
-
-export type MemoryFileName = typeof MEMORY_FILES[number];
+// File-based memory is deprecated; all operations are now database-backed only.
 
 const FOLDER_NAMES = ['AI-Memory', 'memory-bank'];
 
@@ -231,6 +225,18 @@ export class MemoryBankService {
           }
 
           console.log('[MemoryService] Database initialized successfully');
+
+          // Check for schema migrations
+          console.log('[MemoryService] Checking for schema migrations...');
+          const migrationSuccess = await checkAndPromptMigration(this._store, dbPath);
+          
+          if (!migrationSuccess) {
+            console.warn('[MemoryService] Schema migration cancelled or failed');
+            vscode.window.showWarningMessage(
+              'AI-Memory schema migration was not completed. The extension may not function correctly.',
+              'OK'
+            );
+          }
 
           this._state = {
             active: true,

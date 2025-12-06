@@ -61,13 +61,7 @@ interface MarkDeprecatedParams {
 }
 
 // Valid memory files (consolidated to 5)
-const VALID_FILES: MemoryFileName[] = [
-  'activeContext.md',
-  'decisionLog.md', 
-  'progress.md',
-  'systemPatterns.md',
-  'projectBrief.md'
-];
+// File-based memory is deprecated; all operations are now database-backed only.
 
 /**
  * Tool: Show AI-Memory contents
