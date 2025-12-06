@@ -1,31 +1,27 @@
 // AI-Memory Tree View Provider
-// Provides a visual browser for AI-Memory files in the Explorer sidebar
+// Provides a visual browser for AI-Memory (DB-only) in the Explorer sidebar
 
 import * as vscode from 'vscode';
-import { getMemoryService, MemoryBankState } from './memoryService';
+import { getMemoryService } from './memoryService';
 
 export class MemoryTreeItem extends vscode.TreeItem {
   constructor(
     public readonly label: string,
     public readonly collapsibleState: vscode.TreeItemCollapsibleState,
-    public readonly fileUri?: vscode.Uri,
-    public readonly description?: string
+    options?: { description?: string; command?: vscode.Command; iconId?: string }
   ) {
     super(label, collapsibleState);
 
-    if (fileUri) {
-      this.resourceUri = fileUri;
-      this.command = {
-        command: 'vscode.open',
-        title: 'Open Memory File',
-        arguments: [fileUri]
-      };
-      this.contextValue = 'memoryFile';
-      this.iconPath = new vscode.ThemeIcon('file');
+    if (options?.description) {
+      this.description = options.description;
     }
 
-    if (description) {
-      this.description = description;
+    if (options?.command) {
+      this.command = options.command;
+    }
+
+    if (options?.iconId) {
+      this.iconPath = new vscode.ThemeIcon(options.iconId);
     }
   }
 }
@@ -53,53 +49,54 @@ export class MemoryTreeProvider implements vscode.TreeDataProvider<MemoryTreeIte
 
   async getChildren(element?: MemoryTreeItem): Promise<MemoryTreeItem[]> {
     if (element) {
-      return []; // No nested children for now
+      return []; // Flat list for now
     }
 
-    // Root level - show AI-Memory status and files
-    const state = await this.memoryService.detectMemoryBank();
+    const metrics = await this.memoryService.getDashboardMetrics();
+    const state = metrics.state;
 
     if (!state.active || !state.path) {
-      // AI-Memory not found
-      return [
-        new MemoryTreeItem(
-          'AI-Memory: INACTIVE',
-          vscode.TreeItemCollapsibleState.None,
-          undefined,
-          'Click to create'
-        )
-      ];
+      const inactive = new MemoryTreeItem(
+        'AI-Memory: INACTIVE',
+        vscode.TreeItemCollapsibleState.None,
+        {
+          description: 'Click to create',
+          command: { command: 'aiSkeleton.memory.create', title: 'Create Memory Bank' },
+          iconId: 'warning'
+        }
+      );
+      return [inactive];
     }
 
-    // AI-Memory is active - show files
-    const items: MemoryTreeItem[] = [
-      new MemoryTreeItem(
-        'AI-Memory: ACTIVE',
-        vscode.TreeItemCollapsibleState.None,
-        undefined,
-        state.path.fsPath.split('/').pop()
-      )
-    ];
+    const items: MemoryTreeItem[] = [];
 
-    // Add file items (consolidated to 5 essential files)
-    const fileConfigs = [
-      { name: 'activeContext.md', label: 'Active Context', exists: state.files.activeContext },
-      { name: 'progress.md', label: 'Progress', exists: state.files.progress },
-      { name: 'decisionLog.md', label: 'Decision Log', exists: state.files.decisionLog },
-      { name: 'systemPatterns.md', label: 'System Patterns', exists: state.files.systemPatterns },
-      { name: 'projectBrief.md', label: 'Project Brief', exists: state.files.projectBrief },
-    ];
-
-    for (const config of fileConfigs) {
-      if (config.exists) {
-        const uri = vscode.Uri.joinPath(state.path, config.name);
-        items.push(new MemoryTreeItem(
-          config.label,
-          vscode.TreeItemCollapsibleState.None,
-          uri,
-          config.name
-        ));
+    items.push(new MemoryTreeItem(
+      'AI-Memory: ACTIVE',
+      vscode.TreeItemCollapsibleState.None,
+      {
+        description: state.path.fsPath.split(/[\\/]/).pop(),
+        iconId: 'database'
       }
+    ));
+
+    const typeOrder: Array<{ type: keyof typeof metrics.entryCounts; label: string; iconId: string }> = [
+      { type: 'CONTEXT', label: 'Context', iconId: 'file-text' },
+      { type: 'PROGRESS', label: 'Progress', iconId: 'checklist' },
+      { type: 'DECISION', label: 'Decisions', iconId: 'lightbulb' },
+      { type: 'PATTERN', label: 'Patterns', iconId: 'repo-forked' },
+      { type: 'BRIEF', label: 'Brief', iconId: 'book' }
+    ];
+
+    for (const entry of typeOrder) {
+      const count = metrics.entryCounts[entry.type] ?? 0;
+      items.push(new MemoryTreeItem(
+        `${entry.label} (${count})`,
+        vscode.TreeItemCollapsibleState.None,
+        {
+          iconId: entry.iconId,
+          command: { command: 'aiSkeleton.memory.show', title: 'Show Memory' }
+        }
+      ));
     }
 
     return items;
