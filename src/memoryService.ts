@@ -3,7 +3,8 @@
 
 import * as vscode from 'vscode';
 import * as path from 'path';
-import { getMemoryStore, MemoryStore } from './memoryStore';
+import * as fs from 'fs';
+import { getMemoryStore, MemoryStore, MemoryEntry as StoreMemoryEntry } from './memoryStore';
 import { migrateMarkdownToSQLite, isMigrationNeeded } from './memoryMigration';
 import { exportSQLiteToMarkdown, createBackupMarkdown } from './memoryExport';
 
@@ -26,6 +27,22 @@ export interface MemoryEntry {
   type: 'DECISION' | 'CONTEXT' | 'PROGRESS' | 'PATTERN' | 'BRIEF' | 'DEPRECATED' | 'SUPERSEDED';
   date: string; // ISO date YYYY-MM-DD
   content: string;
+}
+
+export interface DashboardTasksSnapshot {
+  next: string[];
+  doing: string[];
+  done: string[];
+  other: string[];
+}
+
+export interface DashboardMetrics {
+  state: MemoryBankState;
+  dbSizeBytes: number | null;
+  avgQueryTimeMs: number | null;
+  entryCounts: Record<StoreMemoryEntry['file_type'], number>;
+  latest: Record<StoreMemoryEntry['file_type'], Array<Pick<StoreMemoryEntry, 'tag' | 'content' | 'timestamp'>>>;
+  tasks: DashboardTasksSnapshot;
 }
 
 const MEMORY_FILES = [
@@ -524,6 +541,83 @@ export class MemoryBankService {
       console.error('[MemoryService] Backup failed:', err);
       return false;
     }
+  }
+
+  /**
+   * Get dashboard metrics
+   */
+  async getDashboardMetrics(): Promise<DashboardMetrics> {
+    // Ensure state is up to date
+    const state = this._state.active ? this._state : await this.detectMemoryBank();
+
+    const entryCounts = await this._store.getEntryCounts();
+    const latest: DashboardMetrics['latest'] = {
+      CONTEXT: [],
+      DECISION: [],
+      PROGRESS: [],
+      PATTERN: [],
+      BRIEF: []
+    };
+
+    for (const type of Object.keys(latest) as StoreMemoryEntry['file_type'][]) {
+      const res = await this._store.queryByType(type, 5);
+      latest[type] = res.entries.map(e => ({ tag: e.tag, content: e.content, timestamp: e.timestamp }));
+    }
+
+    const tasks = await this.getProgressBuckets();
+
+    let dbSizeBytes: number | null = null;
+    if (state.dbPath) {
+      try {
+        const stat = await fs.promises.stat(state.dbPath);
+        dbSizeBytes = stat.size;
+      } catch (err) {
+        console.warn('[MemoryService] Failed to stat database file:', err);
+      }
+    }
+
+    return {
+      state,
+      dbSizeBytes,
+      avgQueryTimeMs: this._store.getAverageQueryTimeMs(),
+      entryCounts,
+      latest,
+      tasks
+    };
+  }
+
+  private async getProgressBuckets(): Promise<DashboardTasksSnapshot> {
+    const snapshot: DashboardTasksSnapshot = { next: [], doing: [], done: [], other: [] };
+
+    if (!this._state.active) {
+      return snapshot;
+    }
+
+    const res = await this._store.queryByType('PROGRESS', 100);
+    const regex = /^(Done|Doing|Next)\s*:\s*-?\s*\[(x|X|\s)\]\s*(.+)$/i;
+
+    for (const entry of res.entries) {
+      const match = entry.content.match(regex);
+      if (!match) {
+        snapshot.other.push(entry.content.trim());
+        continue;
+      }
+
+      const [, bucketRaw, mark, text] = match;
+      const bucket = bucketRaw.toLowerCase();
+      const normalized = text.trim();
+      if (bucket === 'done' || mark.toLowerCase() === 'x') {
+        snapshot.done.push(normalized);
+      } else if (bucket === 'doing') {
+        snapshot.doing.push(normalized);
+      } else if (bucket === 'next') {
+        snapshot.next.push(normalized);
+      } else {
+        snapshot.other.push(normalized);
+      }
+    }
+
+    return snapshot;
   }
 }
 

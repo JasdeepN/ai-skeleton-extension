@@ -6,7 +6,7 @@ import { getMemoryService } from './memoryService';
 import { getMemoryStore } from './memoryStore';
 import { registerMemoryTools } from './memoryTools';
 import { registerMemoryTreeView } from './memoryTreeProvider';
-// import { registerMemoryDashboardView } from './memoryDashboardProvider'; // TODO: Re-enable after adding missing methods
+import { registerMemoryDashboardView } from './memoryDashboardProvider';
 import { registerMCPTreeView } from './mcpTreeProvider';
 import { getMCPConfigString, getMCPServerList } from './mcpStore';
 import { registerDiagnosticsView } from './diagnosticsProvider';
@@ -130,8 +130,8 @@ export async function activate(context: vscode.ExtensionContext) {
   // Register memory tree view
   const { treeView: memoryTreeView, provider: memoryTreeProvider } = registerMemoryTreeView(context);
 
-  // TODO: Register memory dashboard (Activity Bar) - needs getDashboardMetrics in memoryService
-  // const { treeView: memoryDashboardView, provider: memoryDashboardProvider } = registerMemoryDashboardView(context);
+  // Register memory dashboard (Activity Bar)
+  const { treeView: memoryDashboardView, provider: memoryDashboardProvider } = registerMemoryDashboardView(context);
 
   // Register MCP tree view
   const { treeView: mcpTreeView, provider: mcpTreeProvider } = registerMCPTreeView(context);
