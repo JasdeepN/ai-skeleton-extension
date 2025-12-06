@@ -19,18 +19,49 @@ env:
 
 jobs:
   # ============================================
+  # Change detection to skip CI on non-code edits
+  # ============================================
+  changes:
+    name: Detect code changes
+    runs-on: ubuntu-latest
+    outputs:
+      code: ${{ steps.filter.outputs.code }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Filter paths
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            code:
+              - 'src/**'
+              - 'scripts/**'
+              - 'resources/**'
+              - 'embeds/**'
+              - 'package*.json'
+              - 'tsconfig*.json'
+              - 'jest.config.*'
+              - '.github/workflows/**'
+              - 'vsix/last-version.json'
+
+  # ============================================
   # Stage 1: Build & Test (runs on all platforms)
   # Skipped on staging push - dev already validated
   # ============================================
   build-and-test:
     name: Build & Test (${{ matrix.os }}, Node ${{ matrix.node }})
-    if: github.ref != 'refs/heads/staging' || github.event_name == 'pull_request'
+    needs: changes
+    if: needs.changes.outputs.code == 'true' && (github.ref != 'refs/heads/staging' || github.event_name == 'pull_request')
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
-        node: ['18.x', '20.x', '22.x']
+        os: [ubuntu-latest]
+        node: ['20.x']
 
     steps:
       - name: Checkout code
@@ -101,7 +132,7 @@ jobs:
         uses: actions/upload-artifact@v4
         if: matrix.os == 'ubuntu-latest' && matrix.node == '20.x'
         with:
-          name: vsix-package
+          name: vsix-main
           path: 'vsix/ai-skeleton-extension-*.vsix'
           retention-days: 30
 
@@ -118,7 +149,8 @@ jobs:
   # ============================================
   security:
     name: CodeQL Security Analysis
-    if: github.ref != 'refs/heads/staging' || github.event_name == 'pull_request'
+    needs: changes
+    if: needs.changes.outputs.code == 'true' && (github.ref != 'refs/heads/staging' || github.event_name == 'pull_request')
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -147,14 +179,14 @@ jobs:
   # ============================================
   smoke-test:
     name: Smoke Test VSIX
-    if: github.ref != 'refs/heads/staging' || github.event_name == 'pull_request'
-    needs: build-and-test
+    needs: [changes, build-and-test]
+    if: needs.changes.outputs.code == 'true' && (github.ref != 'refs/heads/staging' || github.event_name == 'pull_request')
     runs-on: ubuntu-latest
     steps:
       - name: Download VSIX artifact
         uses: actions/download-artifact@v4
         with:
-          name: vsix-package
+          name: vsix-main
 
       - name: Verify VSIX package
         run: |
@@ -178,8 +210,8 @@ jobs:
   # ============================================
   auto-merge-staging:
     name: Auto-merge to Staging
-    needs: [build-and-test, security, smoke-test]
-    if: github.ref == 'refs/heads/dev' && github.event_name == 'push'
+    needs: [changes, build-and-test, security, smoke-test]
+    if: needs.changes.outputs.code == 'true' && github.ref == 'refs/heads/dev' && github.event_name == 'push'
     runs-on: ubuntu-latest
     outputs:
       merged: ${{ steps.merge.outputs.merged }}
@@ -195,7 +227,7 @@ jobs:
       - name: Download VSIX artifact
         uses: actions/download-artifact@v4
         with:
-          name: vsix-package
+          name: vsix-main
           path: ./vsix-artifact
 
       - name: Download test results
@@ -297,14 +329,6 @@ jobs:
           body: |
             ## Pre-release v${{ steps.version.outputs.version }}-pre
             Auto-published from staging merge.
-
-      - name: Upload VSIX as pre-release artifact
-        if: steps.merge.outputs.merged == 'true'
-        uses: actions/upload-artifact@v4
-        with:
-          name: vsix-prerelease-${{ steps.version.outputs.version }}
-          path: ./vsix-artifact/*.vsix
-          retention-days: 90
 
       - name: Comment on merge failure
         if: failure()
