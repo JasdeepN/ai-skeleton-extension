@@ -33,51 +33,24 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
 
-      - name: Get current version
-        id: current-version
-        run: |
-          VERSION=$(jq -r '.version' package.json)
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "📦 Current version: $VERSION"
-
-      - name: Validate and convert to release version
+      - name: Get current version and increment
         id: release-version
         run: |
-          CURRENT_VERSION=${{ steps.current-version.outputs.version }}
+          CURRENT_VERSION=$(jq -r '.version' package.json | sed 's/-.*$//')
           
           # Parse version components
           MAJOR=$(echo "$CURRENT_VERSION" | cut -d. -f1)
           MINOR=$(echo "$CURRENT_VERSION" | cut -d. -f2)
           PATCH=$(echo "$CURRENT_VERSION" | cut -d. -f3)
           
-          # Check if minor version is odd (pre-release version)
-          if [ $((MINOR % 2)) -eq 1 ]; then
-            # Convert to even minor for release (e.g., 0.3.x -> 0.2.x)
-            # Use previous even minor, increment patch
-            NEW_MINOR=$((MINOR - 1))
-            # Get last release version to determine next patch
-            LAST_RELEASE=$(git tag -l "v${MAJOR}.${NEW_MINOR}.*" --sort=-v:refname | head -1 | sed 's/^v//')
-            if [ -n "$LAST_RELEASE" ]; then
-              LAST_PATCH=$(echo "$LAST_RELEASE" | cut -d. -f3)
-              NEW_PATCH=$((LAST_PATCH + 1))
-            else
-              NEW_PATCH=0
-            fi
-            RELEASE_VERSION="${MAJOR}.${NEW_MINOR}.${NEW_PATCH}"
-            echo "needs_conversion=true" >> $GITHUB_OUTPUT
-            echo "ℹ️ Converting pre-release version ${CURRENT_VERSION} to release ${RELEASE_VERSION}"
-          else
-            # Already even minor, use as-is
-            RELEASE_VERSION="$CURRENT_VERSION"
-            echo "needs_conversion=false" >> $GITHUB_OUTPUT
-            echo "✅ Version ${CURRENT_VERSION} is already release format (even minor)"
-          fi
+          # Increment patch for release
+          NEW_PATCH=$((PATCH + 1))
+          RELEASE_VERSION="${MAJOR}.${MINOR}.${NEW_PATCH}"
           
           echo "version=$RELEASE_VERSION" >> $GITHUB_OUTPUT
-          echo "📦 Release version: $RELEASE_VERSION"
+          echo "📦 Release version: $RELEASE_VERSION (incremented from ${CURRENT_VERSION})"
 
-      - name: Update version to stable
-        if: steps.release-version.outputs.needs_conversion == 'true'
+      - name: Update version for release
         run: |
           RELEASE_VERSION=${{ steps.release-version.outputs.version }}
           
@@ -91,7 +64,7 @@ jobs:
           git commit -m "chore: release version $RELEASE_VERSION [skip ci]"
           git push origin release
           
-          echo "✅ Updated to stable version $RELEASE_VERSION"
+          echo "✅ Updated to release version $RELEASE_VERSION"
 
       - name: Check for existing release tag
         id: tag-check
@@ -144,11 +117,7 @@ jobs:
             --title "Release v${VERSION}" \
             --notes "🎉 **Stable Release v${VERSION}**
             
-            This is a production-ready release using even minor version (${VERSION}) per VS Code extension requirements.
-            
-            **Versioning:**
-            - Stable releases: Even minor versions (0.2.x, 0.4.x, etc.)
-            - Pre-releases: Odd minor versions (0.3.x, 0.5.x, etc.)
+            Production-ready release.
             
             **Requirements:**
             - VS Code >= 1.63.0" \
