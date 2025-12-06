@@ -4,21 +4,31 @@ on:
   pull_request:
     branches:
       - release
+
+  push:
+    branches:
+      - release
       - staging
 
 jobs:
   check_branch:
-    name: Enforce PR source for release/staging
+    name: Enforce branch flow
     runs-on: ubuntu-latest
     steps:
+      - name: Validate staging push comes from dev
+        if: github.event_name == 'push' && github.ref == 'refs/heads/staging' && github.event.ref != 'refs/heads/dev'
+        run: |
+          echo "ERROR: Staging can only receive pushes from dev branch."
+          exit 1
+
+      - name: Block direct pushes to release
+        if: github.event_name == 'push' && github.ref == 'refs/heads/release'
+        run: |
+          echo "ERROR: Direct pushes to 'release' are not allowed. Open a PR from 'staging'."
+          exit 1
+
       - name: Block release unless from staging
         if: github.base_ref == 'release' && github.head_ref != 'staging'
         run: |
           echo "ERROR: Only PRs from 'staging' may be merged into 'release'."
-          exit 1
-
-      - name: Block staging unless from dev
-        if: github.base_ref == 'staging' && github.head_ref != 'dev'
-        run: |
-          echo "ERROR: Only PRs from 'dev' may be merged into 'staging'."
           exit 1
