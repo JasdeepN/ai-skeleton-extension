@@ -96,6 +96,22 @@ jobs:
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "📦 Release version: $VERSION"
 
+      - name: Detect existing version tag
+        id: tag-exists
+        run: |
+          VERSION=${{ steps.final-version.outputs.version }}
+          git fetch --tags --prune --prune-tags
+          if git rev-parse "refs/tags/v${VERSION}" >/dev/null 2>&1; then
+            TAG_SHA=$(git rev-parse "refs/tags/v${VERSION}")
+            echo "exists=true" >> $GITHUB_OUTPUT
+            echo "tag_sha=$TAG_SHA" >> $GITHUB_OUTPUT
+            echo "⚠️ Tag v${VERSION} already exists at $TAG_SHA"
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+            echo "tag_sha=" >> $GITHUB_OUTPUT
+            echo "✅ No existing tag found for v${VERSION}"
+          fi
+
       - name: Compile TypeScript (fast, staging already validated)
         run: npm run compile
 
@@ -127,6 +143,7 @@ jobs:
           artifacts: vsix/ai-skeleton-extension-*.vsix
 
       - name: Tag release version
+        if: steps.tag-exists.outputs.exists == 'false'
         run: |
           VERSION=${{ steps.final-version.outputs.version }}
           git config user.name "github-actions[bot]"
@@ -141,6 +158,20 @@ jobs:
           git push origin latest-stable --force
           
           echo "✅ Tagged v${VERSION} as release"
+
+      - name: Reuse existing tag and update latest-stable
+        if: steps.tag-exists.outputs.exists == 'true'
+        run: |
+          VERSION=${{ steps.final-version.outputs.version }}
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git fetch --tags --prune --prune-tags
+          # Point latest-stable to the existing version tag
+          git tag -f latest-stable "v${VERSION}"
+          git push origin latest-stable --force
+
+          echo "✅ Reused existing v${VERSION} tag (no retag); latest-stable updated"
 
       - name: Publish to VS Code Marketplace
         if: ${{ env.VSCE_PAT != '' }}
