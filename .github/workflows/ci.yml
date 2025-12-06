@@ -306,7 +306,12 @@ jobs:
           fi
           
           # Try to push, handle branch protection gracefully
-          if git push origin staging 2>&1 | tee push_output.log; then
+          set +e  # Don't exit on error
+          git push origin staging 2>&1 | tee push_output.log
+          PUSH_EXIT=$?
+          set -e
+          
+          if [ $PUSH_EXIT -eq 0 ]; then
             echo "merged=true" >> $GITHUB_OUTPUT
             echo "needs_manual=false" >> $GITHUB_OUTPUT
             echo "✅ Successfully merged dev to staging"
