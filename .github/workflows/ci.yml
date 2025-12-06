@@ -35,22 +35,29 @@ jobs:
       - name: Detect changes vs origin/dev
         id: filter
         run: |
-          git fetch origin dev --no-tags
-          
-          # Compare incoming commits vs origin/dev
-          CHANGED_FILES=$(git diff --name-only origin/dev...HEAD 2>/dev/null || echo "")
-          
-          # Check if any code files changed
-          CODE_CHANGED=false
-          for file in $CHANGED_FILES; do
-            if [[ $file =~ ^(src/|scripts/|resources/|embeds/|package|tsconfig|jest.config|\.github/workflows/) ]]; then
-              CODE_CHANGED=true
-              break
-            fi
-          done
-          
-          echo "code=$CODE_CHANGED" >> $GITHUB_OUTPUT
-          echo "Changed files: $CHANGED_FILES"
+          # Only run change detection on dev branch pushes
+          if [[ "$GITHUB_REF" == "refs/heads/dev" ]]; then
+            git fetch origin dev --no-tags 2>/dev/null || true
+            
+            # Compare incoming commits vs origin/dev
+            CHANGED_FILES=$(git diff --name-only origin/dev...HEAD 2>/dev/null || echo "")
+            
+            # Check if any code files changed
+            CODE_CHANGED=false
+            for file in $CHANGED_FILES; do
+              if [[ $file =~ ^(src/|scripts/|resources/|embeds/|package|tsconfig|jest.config|\.github/workflows/) ]]; then
+                CODE_CHANGED=true
+                break
+              fi
+            done
+            
+            echo "code=$CODE_CHANGED" >> $GITHUB_OUTPUT
+            echo "Changed files: $CHANGED_FILES"
+          else
+            # For staging/other branches, assume code changed (skip detection)
+            echo "code=true" >> $GITHUB_OUTPUT
+            echo "Skipping change detection on $GITHUB_REF"
+          fi
 
   # ============================================
   # Stage 1: Build & Test (runs on all platforms)

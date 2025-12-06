@@ -16,10 +16,10 @@ jobs:
     name: Enforce branch flow
     runs-on: ubuntu-latest
     steps:
-      - name: Validate staging push comes from dev
-        if: github.event_name == 'push' && github.ref == 'refs/heads/staging' && github.event.ref != 'refs/heads/dev'
+      - name: Validate staging PR comes from dev
+        if: github.event_name == 'pull_request' && github.base_ref == 'staging' && github.head_ref != 'dev'
         run: |
-          echo "ERROR: Staging can only receive pushes from dev branch."
+          echo "ERROR: Staging PRs must come from dev branch."
           exit 1
 
       - name: Block direct pushes to release
