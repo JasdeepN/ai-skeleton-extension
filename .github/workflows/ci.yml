@@ -326,7 +326,6 @@ jobs:
               exit 1  # Real failure
             fi
           fi
-          fi
 
       - name: Staging Sanity Check - Verify Embeddings
         if: steps.merge.outputs.merged == 'true'
