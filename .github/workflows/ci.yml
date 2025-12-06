@@ -272,6 +272,17 @@ jobs:
             exit 1
           fi
 
+      - name: Setup Node.js for sanity checks
+        if: steps.merge.outputs.merged == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies for sanity checks
+        if: steps.merge.outputs.merged == 'true'
+        run: npm ci
+
       - name: Staging Sanity Check - TypeScript
         if: steps.merge.outputs.merged == 'true'
         shell: bash
