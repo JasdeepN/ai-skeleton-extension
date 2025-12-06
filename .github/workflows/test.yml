@@ -2,9 +2,10 @@ name: CI Tests
 
 on:
   push:
-    branches: [ dev ]
+    branches: [ dev, staging, release ]
   pull_request:
-    branches: [ dev, release ]
+    branches: [ dev, staging, release ]
+  workflow_dispatch:
 
 jobs:
   test:
@@ -18,7 +19,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
-        node: [18.x, 20.x]
+        node: ['18.x', '20.x', '22.x']
 
     steps:
       - name: Checkout code
@@ -32,6 +33,17 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      - name: TypeScript Compilation Check
+        run: |
+          echo "::group::TypeScript Compilation"
+          if ! npx tsc --noEmit; then
+            echo "::error::TypeScript compilation failed. Fix errors before merging."
+            echo "::endgroup::"
+            exit 1
+          fi
+          echo "::endgroup::"
+          echo "✅ TypeScript compilation successful"
 
       - name: Compile TypeScript
         run: npm run compile

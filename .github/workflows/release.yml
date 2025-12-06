@@ -1,13 +1,16 @@
 name: Release to Marketplace
 
 on:
-  push:
+  pull_request:
+    types: [closed]
     branches: [release]
   workflow_dispatch:
 
 jobs:
   release:
     name: Release & Publish
+    # Only run if PR was merged (not just closed) or manually triggered
+    if: github.event_name == 'workflow_dispatch' || (github.event.pull_request.merged == true)
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -64,12 +67,23 @@ jobs:
           artifacts: vsix/ai-skeleton-extension-*.vsix
 
       - name: Publish to VS Code Marketplace
-        run: npx vsce publish --pat ${{ secrets.VSCE_PAT }}
+        run: npx vsce publish --packagePath "vsix/ai-skeleton-extension-${{ env.VERSION }}.vsix" --pat ${{ secrets.VSCE_PAT }}
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
+
+      - name: Sync release back to staging
+        if: success()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          
+          # Force staging to match release (squashed commits)
+          git checkout staging
+          git reset --hard origin/release
+          git push origin staging --force
+          
+          echo "✅ Synced release branch to staging (squashed history)"
 
       - name: Update latest-stable tag
         run: |
           VERSION=$(jq -r '.version' package.json)
-          echo "Published version: v$VERSION"
-          echo "Tag: latest-stable"

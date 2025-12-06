@@ -1,0 +1,74 @@
+name: Staging Branch Auto-Merge
+
+on:
+  push:
+    branches: [ dev ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  auto-merge-to-staging:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20.x'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: TypeScript Compilation Check
+        run: |
+          echo "::group::TypeScript Compilation"
+          if ! npx tsc --noEmit; then
+            echo "::error::TypeScript compilation failed. Fix errors before merging to staging."
+            echo "::endgroup::"
+            exit 1
+          fi
+          echo "::endgroup::"
+          echo "✅ TypeScript compilation successful"
+
+      - name: Run Tests
+        run: npm test
+
+      - name: Merge dev to staging
+        if: success()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          
+          git checkout staging
+          git merge --squash origin/dev
+          
+          if git diff-index --quiet HEAD --; then
+            echo "No changes to merge"
+          else
+            git commit -m "Auto-merge: dev → staging [$(date +'%Y-%m-%d %H:%M:%S')]"
+            git push origin staging
+            echo "✅ Successfully merged dev to staging"
+          fi
+
+      - name: Comment on failure
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const message = `❌ Auto-merge from \`dev\` to \`staging\` failed.
+            
+            **Failure reason:** Compilation or test failures detected.
+            
+            Please review the [workflow run](${context.payload.repository.html_url}/actions/runs/${context.runId}) and fix issues before merging.`;
+            
+            // This would need a PR context - for now just log
+            console.log(message);
