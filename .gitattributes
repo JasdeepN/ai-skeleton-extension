@@ -8,6 +8,13 @@
 *.md text eol=lf
 *.sh text eol=lf
 
+# Embedded content files (critical for consistent hashing across platforms)
+*.prompt.md text eol=lf
+*.agent.md text eol=lf
+.copilotignore text eol=lf
+GUARDRAILS.md text eol=lf
+PROTECTED_FILES.md text eol=lf
+
 # Binary files
 *.png binary
 *.jpg binary
