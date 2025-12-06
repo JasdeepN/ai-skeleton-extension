@@ -141,6 +141,22 @@ jobs:
           allowUpdates: true
           artifacts: vsix/ai-skeleton-extension-*.vsix
 
+      - name: Tag release version
+        run: |
+          VERSION=${{ steps.final-version.outputs.version }}
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          
+          # Create version tag
+          git tag -a "v${VERSION}" -m "Release v${VERSION}"
+          git push origin "v${VERSION}"
+          
+          # Update latest-stable tag
+          git tag -f latest-stable -m "Latest stable release: v${VERSION}"
+          git push origin latest-stable --force
+          
+          echo "✅ Tagged v${VERSION} as release"
+
       - name: Publish to VS Code Marketplace
         if: ${{ env.VSCE_PAT != '' }}
         run: |
