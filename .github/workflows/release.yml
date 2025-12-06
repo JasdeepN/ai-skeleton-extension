@@ -40,51 +40,63 @@ jobs:
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "📦 Current version: $VERSION"
 
-      - name: Strip pre-release suffix if present
-        id: clean-version
+      - name: Validate and convert to release version
+        id: release-version
         run: |
-          VERSION=${{ steps.current-version.outputs.version }}
-          # Remove -pre.X suffix if present
-          CLEAN_VERSION=$(echo "$VERSION" | sed 's/-pre\.[0-9]*$//')
+          CURRENT_VERSION=${{ steps.current-version.outputs.version }}
           
-          if [ "$VERSION" != "$CLEAN_VERSION" ]; then
-            echo "cleaned=true" >> $GITHUB_OUTPUT
-            echo "clean_version=$CLEAN_VERSION" >> $GITHUB_OUTPUT
-            echo "ℹ️ Cleaning version: $VERSION → $CLEAN_VERSION"
+          # Parse version components
+          MAJOR=$(echo "$CURRENT_VERSION" | cut -d. -f1)
+          MINOR=$(echo "$CURRENT_VERSION" | cut -d. -f2)
+          PATCH=$(echo "$CURRENT_VERSION" | cut -d. -f3)
+          
+          # Check if minor version is odd (pre-release version)
+          if [ $((MINOR % 2)) -eq 1 ]; then
+            # Convert to even minor for release (e.g., 0.3.x -> 0.2.x)
+            # Use previous even minor, increment patch
+            NEW_MINOR=$((MINOR - 1))
+            # Get last release version to determine next patch
+            LAST_RELEASE=$(git tag -l "v${MAJOR}.${NEW_MINOR}.*" --sort=-v:refname | head -1 | sed 's/^v//')
+            if [ -n "$LAST_RELEASE" ]; then
+              LAST_PATCH=$(echo "$LAST_RELEASE" | cut -d. -f3)
+              NEW_PATCH=$((LAST_PATCH + 1))
+            else
+              NEW_PATCH=0
+            fi
+            RELEASE_VERSION="${MAJOR}.${NEW_MINOR}.${NEW_PATCH}"
+            echo "needs_conversion=true" >> $GITHUB_OUTPUT
+            echo "ℹ️ Converting pre-release version ${CURRENT_VERSION} to release ${RELEASE_VERSION}"
           else
-            echo "cleaned=false" >> $GITHUB_OUTPUT
-            echo "clean_version=$VERSION" >> $GITHUB_OUTPUT
-            echo "✅ Version already clean: $VERSION"
+            # Already even minor, use as-is
+            RELEASE_VERSION="$CURRENT_VERSION"
+            echo "needs_conversion=false" >> $GITHUB_OUTPUT
+            echo "✅ Version ${CURRENT_VERSION} is already release format (even minor)"
           fi
+          
+          echo "version=$RELEASE_VERSION" >> $GITHUB_OUTPUT
+          echo "📦 Release version: $RELEASE_VERSION"
 
       - name: Update version to stable
-        if: steps.clean-version.outputs.cleaned == 'true'
+        if: steps.release-version.outputs.needs_conversion == 'true'
         run: |
-          CLEAN_VERSION=${{ steps.clean-version.outputs.clean_version }}
+          RELEASE_VERSION=${{ steps.release-version.outputs.version }}
           
-          # Update package.json with clean version
-          jq ".version = \"$CLEAN_VERSION\"" package.json > package.json.tmp
+          # Update package.json with release version
+          jq ".version = \"$RELEASE_VERSION\"" package.json > package.json.tmp
           mv package.json.tmp package.json
           
           git config user.name "Release Bot"
           git config user.email "release@bot.local"
           git add package.json
-          git commit -m "chore: release version $CLEAN_VERSION [skip ci]"
+          git commit -m "chore: release version $RELEASE_VERSION [skip ci]"
           git push origin release
           
-          echo "✅ Updated to stable version $CLEAN_VERSION"
-
-      - name: Get final version
-        id: final-version
-        run: |
-          VERSION=$(jq -r '.version' package.json)
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "📦 Release version: $VERSION"
+          echo "✅ Updated to stable version $RELEASE_VERSION"
 
       - name: Check for existing release tag
         id: tag-check
         run: |
-          VERSION=${{ steps.final-version.outputs.version }}
+          VERSION=${{ steps.release-version.outputs.version }}
           git fetch --tags --prune --prune-tags
           
           if git rev-parse "refs/tags/v${VERSION}" >/dev/null 2>&1; then
@@ -94,6 +106,66 @@ jobs:
             echo "exists=false" >> $GITHUB_OUTPUT
             echo "✅ Creating new tag v${VERSION}"
           fi
+
+      - name: Build VSIX for release
+        run: |
+          npm ci
+          npm run compile
+          mkdir -p vsix
+          VERSION=${{ steps.release-version.outputs.version }}
+          npx @vscode/vsce package --out vsix/ai-skeleton-extension-${VERSION}.vsix
+          echo "✅ Built release VSIX package"
+
+      - name: Create stable release tag
+        if: steps.tag-check.outputs.exists == 'false'
+        run: |
+          VERSION=${{ steps.release-version.outputs.version }}
+          git config user.name "Release Bot"
+          git config user.email "release@bot.local"
+          
+          git tag -a "v${VERSION}" -m "Release v${VERSION}"
+          git push origin "v${VERSION}"
+          
+          # Update latest-stable tracking tag
+          git tag -f latest-stable
+          git push -f origin latest-stable
+          
+          echo "✅ Tagged v${VERSION} as stable release"
+
+      - name: Create GitHub stable release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION=${{ steps.release-version.outputs.version }}
+          VSIX_FILE="vsix/ai-skeleton-extension-${VERSION}.vsix"
+          
+          # Create or update stable release
+          gh release create "v${VERSION}" \
+            --title "Release v${VERSION}" \
+            --notes "🎉 **Stable Release v${VERSION}**
+            
+            This is a production-ready release using even minor version (${VERSION}) per VS Code extension requirements.
+            
+            **Versioning:**
+            - Stable releases: Even minor versions (0.2.x, 0.4.x, etc.)
+            - Pre-releases: Odd minor versions (0.3.x, 0.5.x, etc.)
+            
+            **Requirements:**
+            - VS Code >= 1.63.0" \
+            --latest \
+            "$VSIX_FILE" || \
+          gh release upload "v${VERSION}" "$VSIX_FILE" --clobber
+          
+          echo "✅ Created/updated GitHub release v${VERSION}"
+
+      - name: Publish to VS Code Marketplace
+        if: ${{ env.VSCE_PAT != '' }}
+        run: |
+          VERSION=${{ steps.release-version.outputs.version }}
+          npx @vscode/vsce publish --packagePath "vsix/ai-skeleton-extension-${VERSION}.vsix" --pat "$VSCE_PAT"
+          echo "✅ Published to VS Code Marketplace"
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
 
       - name: Download pre-release VSIX
         id: download-vsix
