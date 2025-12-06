@@ -5,27 +5,38 @@ on:
     types: [closed]
     branches: [release]
   workflow_dispatch:
+    inputs:
+      skip_version_bump:
+        description: 'Skip automatic version bump (use current version)'
+        required: false
+        default: 'false'
+        type: boolean
+
+permissions:
+  contents: write
+  id-token: write
+
+env:
+  NODE_VERSION: '20.x'
 
 jobs:
   release:
     name: Release & Publish
     # Only run if PR was merged (not just closed) or manually triggered
-    if: github.event_name == 'workflow_dispatch' || (github.event.pull_request.merged == true)
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      id-token: write
-
+    
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20.x'
+          node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
 
       - name: Install dependencies
@@ -37,53 +48,122 @@ jobs:
       - name: Run full test suite
         run: npm run test:coverage
 
-      - name: Run E2E tests (Linux)
+      - name: Run E2E tests
         run: xvfb-run -a npm run test:e2e
+
+      - name: Check version status
+        id: version-check
+        run: |
+          CURRENT_VERSION=$(jq -r '.version' package.json)
+          echo "current_version=$CURRENT_VERSION" >> $GITHUB_OUTPUT
+          
+          # Get the last released version from latest-stable tag
+          LAST_RELEASED=""
+          if git rev-parse latest-stable >/dev/null 2>&1; then
+            LAST_RELEASED=$(git show latest-stable:package.json 2>/dev/null | jq -r '.version' || echo "")
+          fi
+          echo "last_released=$LAST_RELEASED" >> $GITHUB_OUTPUT
+          
+          # Check if version was manually bumped
+          if [ -n "$LAST_RELEASED" ] && [ "$CURRENT_VERSION" != "$LAST_RELEASED" ]; then
+            echo "version_changed=true" >> $GITHUB_OUTPUT
+            echo "✅ Version manually changed: $LAST_RELEASED → $CURRENT_VERSION"
+          else
+            echo "version_changed=false" >> $GITHUB_OUTPUT
+            echo "ℹ️ Version unchanged: $CURRENT_VERSION"
+          fi
+
+      - name: Auto-bump version (if not manually changed)
+        id: bump
+        if: steps.version-check.outputs.version_changed == 'false' && github.event.inputs.skip_version_bump != 'true'
+        run: |
+          git config user.name "Release Bot"
+          git config user.email "release@bot.local"
+          
+          # Bump patch version
+          npm version patch --no-git-tag-version
+          NEW_VERSION=$(jq -r '.version' package.json)
+          
+          git add package.json package-lock.json
+          git commit -m "chore: bump version to $NEW_VERSION [skip ci]"
+          git push origin release
+          
+          echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
+          echo "✅ Auto-bumped version to $NEW_VERSION"
+
+      - name: Get final version
+        id: final-version
+        run: |
+          VERSION=$(jq -r '.version' package.json)
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "📦 Release version: $VERSION"
 
       - name: Build VSIX package
         run: npm run package:vsix
 
-      - name: Create release tag
-        id: tag
+      - name: Create/Update latest-stable tag
         run: |
-          VERSION=$(jq -r '.version' package.json)
+          VERSION=${{ steps.final-version.outputs.version }}
           git config user.name "Release Bot"
           git config user.email "release@bot.local"
-          echo "VERSION=$VERSION" >> $GITHUB_ENV
-          git tag -a latest-stable -m "Release v$VERSION" || git tag -d latest-stable && git tag -a latest-stable -m "Release v$VERSION"
-          git push origin latest-stable --force
+          
+          # Delete existing tag if present
+          git tag -d latest-stable 2>/dev/null || true
+          git push origin :refs/tags/latest-stable 2>/dev/null || true
+          
+          # Create new tag
+          git tag -a latest-stable -m "Release v$VERSION"
+          git push origin latest-stable
+          echo "✅ Tagged as latest-stable"
 
       - name: Create GitHub Release
         uses: ncipollo/release-action@v1
         with:
           tag: latest-stable
-          name: Stable Release (v${{ env.VERSION }})
+          name: v${{ steps.final-version.outputs.version }}
           body: |
+            ## Release v${{ steps.final-version.outputs.version }}
+            
             This is a stable release of AI Skeleton Extension.
             
-            Changes from previous release: See commit history between tags.
+            ### Installation
+            Download the `.vsix` file and install via VS Code Extensions panel,
+            or install directly from the VS Code Marketplace.
+            
+            ### Changes
+            See commit history for detailed changes.
           draft: false
           prerelease: false
+          allowUpdates: true
           artifacts: vsix/ai-skeleton-extension-*.vsix
 
       - name: Publish to VS Code Marketplace
-        run: npx vsce publish --packagePath "vsix/ai-skeleton-extension-${{ env.VERSION }}.vsix" --pat ${{ secrets.VSCE_PAT }}
+        if: secrets.VSCE_PAT != ''
+        run: |
+          VERSION=${{ steps.final-version.outputs.version }}
+          npx vsce publish --packagePath "vsix/ai-skeleton-extension-${VERSION}.vsix" --pat "${{ secrets.VSCE_PAT }}"
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
 
       - name: Sync release back to staging
-        if: success()
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           
-          # Force staging to match release (squashed commits)
+          # Update staging to match release
           git checkout staging
           git reset --hard origin/release
           git push origin staging --force
           
-          echo "✅ Synced release branch to staging (squashed history)"
+          echo "✅ Synced release → staging"
 
-      - name: Update latest-stable tag
+      - name: Summary
         run: |
-          VERSION=$(jq -r '.version' package.json)
+          echo "## 🎉 Release Complete!" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Version:** v${{ steps.final-version.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Tag:** latest-stable" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Artifacts" >> $GITHUB_STEP_SUMMARY
+          echo "- VSIX package uploaded to GitHub Release" >> $GITHUB_STEP_SUMMARY
+          echo "- Published to VS Code Marketplace" >> $GITHUB_STEP_SUMMARY

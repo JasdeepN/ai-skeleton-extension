@@ -1,0 +1,250 @@
+name: CI Pipeline
+
+on:
+  push:
+    branches: [dev, staging, release]
+  pull_request:
+    branches: [dev, staging, release]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+  security-events: write
+  actions: read
+  id-token: write
+
+env:
+  NODE_VERSION: '20.x'
+
+jobs:
+  # ============================================
+  # Stage 1: Build & Test (runs on all platforms)
+  # ============================================
+  build-and-test:
+    name: Build & Test (${{ matrix.os }}, Node ${{ matrix.node }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        node: ['18.x', '20.x', '22.x']
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js ${{ matrix.node }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: TypeScript Compilation Check
+        shell: bash
+        run: |
+          if ! npx tsc --noEmit; then
+            echo "::error::TypeScript compilation failed"
+            exit 1
+          fi
+          echo "✅ TypeScript compilation successful"
+
+      - name: Compile TypeScript
+        run: npm run compile
+
+      - name: Run unit tests with coverage
+        run: npm run test:coverage
+
+      - name: Upload coverage (Ubuntu/Node 20 only)
+        uses: codecov/codecov-action@v4
+        if: matrix.os == 'ubuntu-latest' && matrix.node == '20.x'
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: ./coverage/coverage-final.json
+          flags: unittests
+          fail_ci_if_error: false
+
+      - name: Run E2E tests (Linux)
+        if: runner.os == 'Linux'
+        run: xvfb-run -a npm run test:e2e
+
+      - name: Run E2E tests (Windows/macOS)
+        if: runner.os != 'Linux'
+        run: npm run test:e2e
+
+      - name: Build VSIX package
+        if: matrix.os == 'ubuntu-latest' && matrix.node == '20.x'
+        run: npm run package:vsix
+
+      - name: Upload VSIX artifact
+        uses: actions/upload-artifact@v4
+        if: matrix.os == 'ubuntu-latest' && matrix.node == '20.x'
+        with:
+          name: vsix-package
+          path: 'vsix/*.vsix'
+          retention-days: 30
+
+      - name: Upload test results
+        uses: actions/upload-artifact@v4
+        if: matrix.os == 'ubuntu-latest' && matrix.node == '20.x'
+        with:
+          name: test-results
+          path: |
+            coverage/
+          retention-days: 7
+
+  # ============================================
+  # Stage 1 (parallel): Security Analysis
+  # ============================================
+  security:
+    name: CodeQL Security Analysis
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: javascript
+
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@v3
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:javascript"
+
+  # ============================================
+  # Stage 2: Smoke Test VSIX (after build passes)
+  # ============================================
+  smoke-test:
+    name: Smoke Test VSIX
+    needs: build-and-test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download VSIX artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: vsix-package
+
+      - name: Verify VSIX package
+        run: |
+          if [ ! -f *.vsix ]; then
+            echo "::error::VSIX file not found!"
+            exit 1
+          fi
+          VSIX_FILE=$(ls *.vsix)
+          echo "✅ VSIX package verified: $VSIX_FILE"
+          echo "VSIX_FILE=$VSIX_FILE" >> $GITHUB_ENV
+          
+          # Basic integrity check
+          unzip -t "$VSIX_FILE" > /dev/null 2>&1 || {
+            echo "::error::VSIX archive is corrupted"
+            exit 1
+          }
+          echo "✅ VSIX integrity verified"
+
+  # ============================================
+  # Stage 3: Auto-merge to Staging (dev branch only)
+  # ============================================
+  auto-merge-staging:
+    name: Auto-merge to Staging
+    needs: [build-and-test, security, smoke-test]
+    if: github.ref == 'refs/heads/dev' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    outputs:
+      merged: ${{ steps.merge.outputs.merged }}
+      version: ${{ steps.version.outputs.version }}
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Download VSIX artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: vsix-package
+          path: ./vsix-artifact
+
+      - name: Download test results
+        uses: actions/download-artifact@v4
+        with:
+          name: test-results
+          path: ./test-results
+
+      - name: Verify artifacts exist
+        run: |
+          if [ ! -f ./vsix-artifact/*.vsix ]; then
+            echo "::error::VSIX artifact missing - cannot merge to staging"
+            exit 1
+          fi
+          echo "✅ All required artifacts present"
+
+      - name: Get current version
+        id: version
+        run: |
+          VERSION=$(jq -r '.version' package.json)
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Current version: $VERSION"
+
+      - name: Merge dev to staging
+        id: merge
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          
+          git checkout staging
+          
+          # Try fast-forward merge first, fall back to squash
+          if git merge --ff-only origin/dev 2>/dev/null; then
+            echo "✅ Fast-forward merge successful"
+          else
+            git merge --squash origin/dev
+            if git diff-index --quiet HEAD --; then
+              echo "No changes to merge"
+              echo "merged=false" >> $GITHUB_OUTPUT
+              exit 0
+            fi
+            git commit -m "chore: merge dev → staging [$(date +'%Y-%m-%d')]"
+          fi
+          
+          git push origin staging
+          echo "merged=true" >> $GITHUB_OUTPUT
+          echo "✅ Successfully merged dev to staging"
+
+      - name: Tag pre-release
+        if: steps.merge.outputs.merged == 'true'
+        run: |
+          VERSION=${{ steps.version.outputs.version }}
+          PRERELEASE_TAG="v${VERSION}-pre.$(date +'%Y%m%d%H%M')"
+          
+          git tag -a "$PRERELEASE_TAG" -m "Pre-release: $PRERELEASE_TAG"
+          git push origin "$PRERELEASE_TAG"
+          echo "✅ Tagged pre-release: $PRERELEASE_TAG"
+
+      - name: Upload VSIX as pre-release artifact
+        if: steps.merge.outputs.merged == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: vsix-prerelease-${{ steps.version.outputs.version }}
+          path: ./vsix-artifact/*.vsix
+          retention-days: 90
+
+      - name: Comment on merge failure
+        if: failure()
+        run: |
+          echo "::warning::Auto-merge failed. Manual merge required."
+          echo "Review the workflow run and resolve conflicts manually."
