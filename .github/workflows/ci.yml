@@ -102,7 +102,7 @@ jobs:
         if: matrix.os == 'ubuntu-latest' && matrix.node == '20.x'
         with:
           name: vsix-package
-          path: 'vsix/*.vsix'
+          path: 'vsix/ai-skeleton-extension-*.vsix'
           retention-days: 30
 
       - name: Upload test results
