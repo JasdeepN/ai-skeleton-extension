@@ -16,11 +16,39 @@ jobs:
     name: Enforce branch flow
     runs-on: ubuntu-latest
     steps:
-      - name: Validate staging PR comes from dev
-        if: github.event_name == 'pull_request' && github.base_ref == 'staging' && github.head_ref != 'dev'
+      - name: Checkout with history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate staging receives only from dev
+        if: github.ref == 'refs/heads/staging' || github.base_ref == 'staging'
         run: |
-          echo "ERROR: Staging PRs must come from dev branch."
-          exit 1
+          # For PR events, check head branch
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            if [ "${{ github.head_ref }}" != "dev" ]; then
+              echo "ERROR: Staging PRs must come from dev branch. Got: ${{ github.head_ref }}"
+              exit 1
+            fi
+          fi
+          
+          # For push events (merges), verify commits exist in dev
+          if [ "${{ github.event_name }}" = "push" ]; then
+            git fetch origin dev --no-tags 2>/dev/null || true
+            
+            BEFORE="${{ github.event.before }}"
+            AFTER="${{ github.sha }}"
+            
+            # Check each pushed commit exists in origin/dev
+            for commit in $(git rev-list $BEFORE..$AFTER 2>/dev/null || echo ""); do
+              if ! git merge-base --is-ancestor "$commit" origin/dev 2>/dev/null; then
+                echo "ERROR: Commit $commit is not from dev branch."
+                exit 1
+              fi
+            done
+          fi
+          
+          echo "✅ Staging update is from dev"
 
       - name: Block direct pushes to release
         if: github.event_name == 'push' && github.ref == 'refs/heads/release'
