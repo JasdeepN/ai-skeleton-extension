@@ -385,6 +385,11 @@
           "id": "aiSkeletonDiagnostics",
           "name": "Diagnostics",
           "icon": "resources/ai-skeleton.svg"
+        },
+        {
+          "id": "aiSkeletonMemoryDashboard",
+          "name": "Memory Dashboard",
+          "icon": "resources/ai-skeleton.svg"
         }
       ],
       "explorer": [
