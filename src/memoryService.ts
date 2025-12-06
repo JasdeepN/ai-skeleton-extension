@@ -182,13 +182,12 @@ export class MemoryBankService {
               }
             }
 
-            const coreFilesExist = filesState.activeContext &&
-              filesState.decisionLog &&
-              filesState.systemPatterns &&
-              filesState.progress;
+            // SQLite-only mode: Memory bank is active if database is initialized
+            // Markdown files are optional (created via Dump Memory command)
+            const dbInitialized = this._store.getBackend() !== 'none';
 
             this._state = {
-              active: coreFilesExist,
+              active: dbInitialized,
               path: memoryPath,
               dbPath,
               activity: 'idle',
