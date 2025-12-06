@@ -67,6 +67,9 @@ jobs:
       - name: Create pre-release tag
         if: steps.tag-check.outputs.exists == 'false'
         run: |
+          git config user.name "Pre-Release Bot"
+          git config user.email "prerelease@bot.local"
+          
           VERSION=${{ steps.current-version.outputs.version }}
           git tag -a "v${VERSION}-pre" -m "Pre-release v${VERSION}"
           git push origin "v${VERSION}-pre"
