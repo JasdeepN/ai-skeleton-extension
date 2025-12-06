@@ -145,11 +145,11 @@ jobs:
 
   # ============================================
   # Staging Quick Check (lightweight validation)
-  # Only runs on staging push, not on dev or PRs
+  # Runs on every push to staging (including auto-merge from dev)
   # ============================================
   staging-sanity-check:
     name: Staging Sanity Check
-    if: github.ref == 'refs/heads/staging' && github.event_name == 'push'
+    if: github.ref == 'refs/heads/staging'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
