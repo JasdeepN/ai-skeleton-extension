@@ -32,13 +32,14 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Detect changes vs origin/dev
+      - name: Detect changes vs previous commit
         id: filter
         run: |
-          git fetch origin dev --no-tags
+          BEFORE="${{ github.event.before }}"
+          AFTER="${{ github.sha }}"
           
-          # Compare incoming commits vs origin/dev
-          CHANGED_FILES=$(git diff --name-only origin/dev...HEAD 2>/dev/null || echo "")
+          # Compare incoming commits vs previous state
+          CHANGED_FILES=$(git diff --name-only $BEFORE..$AFTER 2>/dev/null || echo "")
           
           # Check if any code files changed
           CODE_CHANGED=false
