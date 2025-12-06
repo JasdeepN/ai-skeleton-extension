@@ -40,6 +40,9 @@ jobs:
           echo "::endgroup::"
           echo "✅ TypeScript compilation successful"
 
+      - name: Compile TypeScript
+        run: npm run compile
+
       - name: Run Tests
         run: npm test
 
