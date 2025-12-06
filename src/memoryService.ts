@@ -1,11 +1,10 @@
 // AI-Memory Service - Core memory management with SQLite backend
-// Provides queryable memory operations with markdown fallback
+// DB-only persistence (markdown export removed)
 
 import * as vscode from 'vscode';
 import * as path from 'path';
-import { getMemoryStore, MemoryStore } from './memoryStore';
-import { migrateMarkdownToSQLite, isMigrationNeeded } from './memoryMigration';
-import { exportSQLiteToMarkdown, createBackupMarkdown } from './memoryExport';
+import * as fs from 'fs';
+import { getMemoryStore, MemoryStore, MemoryEntry as StoreMemoryEntry } from './memoryStore';
 
 export interface MemoryBankState {
   active: boolean;
@@ -28,6 +27,22 @@ export interface MemoryEntry {
   content: string;
 }
 
+export interface DashboardTasksSnapshot {
+  next: string[];
+  doing: string[];
+  done: string[];
+  other: string[];
+}
+
+export interface DashboardMetrics {
+  state: MemoryBankState;
+  dbSizeBytes: number | null;
+  avgQueryTimeMs: number | null;
+  entryCounts: Record<StoreMemoryEntry['file_type'], number>;
+  latest: Record<StoreMemoryEntry['file_type'], Array<Pick<StoreMemoryEntry, 'tag' | 'content' | 'timestamp'>>>;
+  tasks: DashboardTasksSnapshot;
+}
+
 const MEMORY_FILES = [
   'activeContext.md',
   'decisionLog.md',
@@ -37,14 +52,6 @@ const MEMORY_FILES = [
 ] as const;
 
 export type MemoryFileName = typeof MEMORY_FILES[number];
-
-const FILE_KEY_MAP: Record<string, keyof MemoryBankState['files']> = {
-  'activeContext.md': 'activeContext',
-  'decisionLog.md': 'decisionLog',
-  'systemPatterns.md': 'systemPatterns',
-  'progress.md': 'progress',
-  'projectBrief.md': 'projectBrief'
-};
 
 const FOLDER_NAMES = ['AI-Memory', 'memory-bank'];
 
@@ -80,22 +87,89 @@ export class MemoryBankService {
     return MEMORY_FILES;
   }
 
+  /**
+   * Provide dashboard-friendly metrics snapshot
+   */
+  async getDashboardMetrics(): Promise<DashboardMetrics> {
+    // Ensure state is up to date
+    const state = this._state.active ? this._state : await this.detectMemoryBank();
+
+    const entryCounts = await this._store.getEntryCounts();
+    const latest: DashboardMetrics['latest'] = {
+      CONTEXT: [],
+      DECISION: [],
+      PROGRESS: [],
+      PATTERN: [],
+      BRIEF: []
+    };
+
+    for (const type of Object.keys(latest) as StoreMemoryEntry['file_type'][]) {
+      const res = await this._store.queryByType(type, 5);
+      latest[type] = res.entries.map(e => ({ tag: e.tag, content: e.content, timestamp: e.timestamp }));
+    }
+
+    const tasks = await this.getProgressBuckets();
+
+    let dbSizeBytes: number | null = null;
+    if (state.dbPath) {
+      try {
+        const stat = await fs.promises.stat(state.dbPath);
+        dbSizeBytes = stat.size;
+      } catch (err) {
+        console.warn('[MemoryService] Failed to stat database file:', err);
+      }
+    }
+
+    return {
+      state,
+      dbSizeBytes,
+      avgQueryTimeMs: this._store.getAverageQueryTimeMs(),
+      entryCounts,
+      latest,
+      tasks
+    };
+  }
+
+  private async getProgressBuckets(): Promise<DashboardTasksSnapshot> {
+    const snapshot: DashboardTasksSnapshot = { next: [], doing: [], done: [], other: [] };
+
+    if (!this._state.active) {
+      return snapshot;
+    }
+
+    const res = await this._store.queryByType('PROGRESS', 100);
+    const regex = /^(Done|Doing|Next)\s*:\s*-?\s*\[(x|X|\s)\]\s*(.+)$/i;
+
+    for (const entry of res.entries) {
+      const match = entry.content.match(regex);
+      if (!match) {
+        snapshot.other.push(entry.content.trim());
+        continue;
+      }
+
+      const [, bucketRaw, mark, text] = match;
+      const bucket = bucketRaw.toLowerCase();
+      const normalized = text.trim();
+      if (bucket === 'done' || mark.toLowerCase() === 'x') {
+        snapshot.done.push(normalized);
+      } else if (bucket === 'doing') {
+        snapshot.doing.push(normalized);
+      } else if (bucket === 'next') {
+        snapshot.next.push(normalized);
+      } else {
+        snapshot.other.push(normalized);
+      }
+    }
+
+    return snapshot;
+  }
+
   private getToday(): string {
     return new Date().toISOString().split('T')[0];
   }
 
   private formatTag(type: MemoryEntry['type']): string {
     return `[${type}:${this.getToday()}]`;
-  }
-
-  private encode(text: string): Uint8Array {
-    const g: any = globalThis as any;
-    if (typeof g.TextEncoder === 'function') {
-      return new g.TextEncoder().encode(text);
-    } else if (g.Buffer && typeof g.Buffer.from === 'function') {
-      return g.Buffer.from(text, 'utf8');
-    }
-    return new Uint8Array(text.split('').map((c: string) => c.charCodeAt(0)));
   }
 
   /**
@@ -124,87 +198,62 @@ export class MemoryBankService {
         console.log('[MemoryService] Checking for memory at:', memoryPath.fsPath);
         try {
           const stat = await vscode.workspace.fs.stat(memoryPath);
-          if (stat.type === vscode.FileType.Directory) {
-            console.log('[MemoryService] Found memory directory at:', memoryPath.fsPath);
-            
-            // Initialize SQLite database
-            const dbPath = path.join(memoryPath.fsPath, 'memory.db');
-            console.log('[MemoryService] Initializing database at:', dbPath);
-            let initialized = false;
-            try {
-              initialized = await this._store.init(dbPath);
-            } catch (dbError) {
-              console.error('[MemoryService] Database initialization threw error:', dbError);
-              // Will be handled by !initialized check below
-            }
+          if (stat.type !== vscode.FileType.Directory) {
+            continue;
+          }
 
-            if (!initialized) {
-              console.error('[MemoryService] Failed to initialize database at:', dbPath);
-              vscode.window.showErrorMessage(
-                'Failed to create AI-Memory: Error: Failed to initialize database. Check VS Code output for details.'
-              );
-              this._state = {
-                active: false,
-                path: memoryPath,
-                activity: 'idle',
-                backend: 'none',
-                files: { activeContext: false, decisionLog: false, systemPatterns: false, progress: false, projectBrief: false }
-              };
-              this._onDidChangeState.fire(this._state);
-              return this._state;
-            }
+          console.log('[MemoryService] Found memory directory at:', memoryPath.fsPath);
 
-            console.log('[MemoryService] Database initialized successfully');
+          const dbPath = path.join(memoryPath.fsPath, 'memory.db');
+          console.log('[MemoryService] Initializing database at:', dbPath);
 
-            // Check if migration needed
-            if (await isMigrationNeeded(memoryPath, this._store)) {
-              console.log('[MemoryService] Running migration from markdown to SQLite');
-              const migrationResult = await migrateMarkdownToSQLite(memoryPath, this._store);
-              console.log('[MemoryService] Migration complete:', migrationResult);
-            }
+          let initialized = false;
+          try {
+            initialized = await this._store.init(dbPath);
+          } catch (dbError) {
+            console.error('[MemoryService] Database initialization threw error:', dbError);
+          }
 
-            // Verify core files exist or create them
-            const filesState: MemoryBankState['files'] = {
+          if (!initialized) {
+            console.error('[MemoryService] Failed to initialize database at:', dbPath);
+            vscode.window.showErrorMessage(
+              'Failed to create AI-Memory: Error: Failed to initialize database. Check VS Code output for details.'
+            );
+            this._state = {
+              active: false,
+              path: memoryPath,
+              activity: 'idle',
+              backend: 'none',
+              files: { activeContext: false, decisionLog: false, systemPatterns: false, progress: false, projectBrief: false }
+            };
+            this._onDidChangeState.fire(this._state);
+            return this._state;
+          }
+
+          console.log('[MemoryService] Database initialized successfully');
+
+          this._state = {
+            active: true,
+            path: memoryPath,
+            dbPath,
+            activity: 'idle',
+            backend: this._store.getBackend(),
+            files: {
               activeContext: false,
               decisionLog: false,
               systemPatterns: false,
               progress: false,
               projectBrief: false
-            };
-
-            for (const file of MEMORY_FILES) {
-              try {
-                await vscode.workspace.fs.stat(vscode.Uri.joinPath(memoryPath, file));
-                const key = FILE_KEY_MAP[file];
-                if (key) filesState[key] = true;
-              } catch {
-                // File doesn't exist yet, may be created by export
-              }
             }
+          };
 
-            const coreFilesExist = filesState.activeContext &&
-              filesState.decisionLog &&
-              filesState.systemPatterns &&
-              filesState.progress;
+          console.log('[MemoryService] Memory bank detected:', {
+            active: this._state.active,
+            backend: this._state.backend
+          });
 
-            this._state = {
-              active: coreFilesExist,
-              path: memoryPath,
-              dbPath,
-              activity: 'idle',
-              backend: this._store.getBackend(),
-              files: filesState
-            };
-            
-            console.log('[MemoryService] Memory bank detected:', {
-              active: this._state.active,
-              backend: this._state.backend,
-              files: filesState
-            });
-            
-            this._onDidChangeState.fire(this._state);
-            return this._state;
-          }
+          this._onDidChangeState.fire(this._state);
+          return this._state;
         } catch {
           // folder doesn't exist
         }
@@ -230,7 +279,7 @@ export class MemoryBankService {
   }
 
   /**
-   * Create new AI-Memory folder with initial files
+   * Create new AI-Memory folder backed by SQLite only (no markdown files)
    */
   async createMemoryBank(folder?: vscode.WorkspaceFolder): Promise<boolean> {
     const ws = vscode.workspace.workspaceFolders;
@@ -252,22 +301,18 @@ export class MemoryBankService {
         throw new Error('Failed to initialize database');
       }
 
-      // Small delay to ensure database file is written to disk
-      await new Promise(resolve => setTimeout(resolve, 100));
-
-      // Create default memory files with initialized content
+      // Seed initial entries for clarity (DB-only)
       const today = this.getToday();
-      const defaultFiles: Record<string, string> = {
-        'projectBrief.md': `# Project Brief\n\n---\n\n[BRIEF:${today}] AI-Memory initialized\n`,
-        'activeContext.md': `# Active Context\n\n---\n\n[CONTEXT:${today}] AI-Memory initialized\n`,
-        'systemPatterns.md': `# System Patterns\n\n---\n\n[PATTERN:${today}] AI-Memory initialized\n`,
-        'decisionLog.md': `# Decision Log\n\n---\n\n[DECISION:${today}] AI-Memory initialized\n`,
-        'progress.md': `# Progress\n\n---\n\n[PROGRESS:${today}] AI-Memory initialized\n`,
-      };
-      
-      for (const [filename, content] of Object.entries(defaultFiles)) {
-        const filePath = vscode.Uri.joinPath(memoryPath, filename);
-        await vscode.workspace.fs.writeFile(filePath, this.encode(content));
+      const seedEntries: Array<StoreMemoryEntry> = [
+        { file_type: 'BRIEF', timestamp: new Date().toISOString(), tag: `BRIEF:${today}`, content: 'AI-Memory initialized' },
+        { file_type: 'CONTEXT', timestamp: new Date().toISOString(), tag: `CONTEXT:${today}`, content: 'AI-Memory initialized' },
+        { file_type: 'PATTERN', timestamp: new Date().toISOString(), tag: `PATTERN:${today}`, content: 'AI-Memory initialized' },
+        { file_type: 'DECISION', timestamp: new Date().toISOString(), tag: `DECISION:${today}`, content: 'AI-Memory initialized' },
+        { file_type: 'PROGRESS', timestamp: new Date().toISOString(), tag: `PROGRESS:${today}`, content: 'AI-Memory initialized' }
+      ];
+
+      for (const entry of seedEntries) {
+        await this._store.appendEntry(entry);
       }
 
       await this.detectMemoryBank();
@@ -304,11 +349,6 @@ export class MemoryBankService {
       this.setActivity('write');
       this._cache.delete('DECISION');  // Invalidate cache
       
-      // Export to markdown for immediate visibility
-      if (this._state.path) {
-        await exportSQLiteToMarkdown(this._state.path, this._store);
-      }
-      
       return true;
     } catch (err) {
       vscode.window.showErrorMessage(`Failed to log decision: ${err}`);
@@ -339,11 +379,6 @@ export class MemoryBankService {
       });
       this.setActivity('write');
       this._cache.delete('CONTEXT');
-      
-      // Export to markdown for immediate visibility
-      if (this._state.path) {
-        await exportSQLiteToMarkdown(this._state.path, this._store);
-      }
       
       return true;
     } catch (err) {
@@ -379,11 +414,6 @@ export class MemoryBankService {
       this.setActivity('write');
       this._cache.delete('PROGRESS');
       
-      // Export to markdown for immediate visibility
-      if (this._state.path) {
-        await exportSQLiteToMarkdown(this._state.path, this._store);
-      }
-      
       return true;
     } catch (err) {
       vscode.window.showErrorMessage(`Failed to update progress: ${err}`);
@@ -415,11 +445,6 @@ export class MemoryBankService {
       });
       this.setActivity('write');
       this._cache.delete('PATTERN');
-      
-      // Export to markdown for immediate visibility
-      if (this._state.path) {
-        await exportSQLiteToMarkdown(this._state.path, this._store);
-      }
       
       return true;
     } catch (err) {
@@ -521,41 +546,189 @@ export class MemoryBankService {
   }
 
   /**
-   * Get URI for memory file (for opening in editor)
+   * Calculate context budget based on current token usage
+   * Allocates tokens: 20% for output buffer, rest available for context
    */
-  getMemoryFileUri(filename: MemoryFileName): vscode.Uri | null {
-    if (!this._state.path) return null;
-    return vscode.Uri.joinPath(this._state.path, filename);
+  getContextBudget(usedTokens: number, contextWindow: number = 200000): {
+    total: number;
+    used: number;
+    remaining: number;
+    percentUsed: number;
+    status: 'healthy' | 'warning' | 'critical';
+    recommendations: string[];
+  } {
+    const outputBuffer = contextWindow * 0.20; // Reserve 20% for output
+    const availableInput = contextWindow - outputBuffer;
+    const remaining = availableInput - usedTokens;
+    const percentUsed = (usedTokens / availableInput) * 100;
+
+    let status: 'healthy' | 'warning' | 'critical';
+    let recommendations: string[] = [];
+
+    if (remaining > 50000) {
+      status = 'healthy';
+      recommendations = ['Continue adding context as needed'];
+    } else if (remaining > 10000) {
+      status = 'warning';
+      recommendations = [
+        'Context budget getting low (< 50K tokens)',
+        'Consider summarizing long contexts',
+        'May need new chat soon'
+      ];
+    } else {
+      status = 'critical';
+      recommendations = [
+        'Critical: Context budget nearly exhausted (< 10K tokens)',
+        'Start new chat recommended',
+        'Compress or remove non-essential context'
+      ];
+    }
+
+    return {
+      total: availableInput,
+      used: usedTokens,
+      remaining: Math.max(0, remaining),
+      percentUsed: Math.min(100, percentUsed),
+      status,
+      recommendations
+    };
   }
 
   /**
-   * Export to markdown for backup
+   * Select memory entries that fit within a token budget
+   * Uses greedy algorithm: includes top-scored entries until budget exhausted
+   * 
+   * @param taskDescription Brief description of the task for relevance scoring
+   * @param tokenBudget Maximum tokens available for context
+   * @returns Selected entries and coverage stats
    */
-  async exportToMarkdown(): Promise<boolean> {
-    if (!this._state.active || !this._state.path) return false;
+  async selectContextForBudget(
+    taskDescription: string,
+    tokenBudget: number
+  ): Promise<{
+    entries: StoreMemoryEntry[];
+    coverage: string;
+    totalTokens: number;
+    selectedCount: number;
+    totalCount: number;
+  }> {
+    if (!this._state.active) {
+      return {
+        entries: [],
+        coverage: 'Memory bank inactive',
+        totalTokens: 0,
+        selectedCount: 0,
+        totalCount: 0
+      };
+    }
 
-    try {
-      const result = await exportSQLiteToMarkdown(this._state.path, this._store);
-      return result.success;
-    } catch (err) {
-      console.error('[MemoryService] Export failed:', err);
-      return false;
+    // Fetch all entries (reasonable limit for typical workflows)
+    const allEntries = await this._store.queryByType('CONTEXT', 100);
+    const decisions = await this._store.queryByType('DECISION', 100);
+    const patterns = await this._store.queryByType('PATTERN', 100);
+    const briefs = await this._store.queryByType('BRIEF', 100);
+
+    const allMemoryEntries: StoreMemoryEntry[] = [
+      ...allEntries.entries,
+      ...decisions.entries,
+      ...patterns.entries,
+      ...briefs.entries
+    ];
+
+    if (allMemoryEntries.length === 0) {
+      return {
+        entries: [],
+        coverage: 'No memory entries found',
+        totalTokens: 0,
+        selectedCount: 0,
+        totalCount: 0
+      };
+    }
+
+    // Score entries for relevance (simple: type + recency weighting)
+    // Full implementation would use RelevanceScorer
+    const scored = allMemoryEntries.map(entry => {
+      // Simple scoring: recent + high-priority types score higher
+      const typeScore = this.getTypeScore(entry.file_type);
+      const recencyScore = this.getRecencyScore(entry.timestamp);
+      return {
+        entry,
+        score: typeScore * recencyScore
+      };
+    });
+
+    // Sort by score (highest first)
+    scored.sort((a, b) => b.score - a.score);
+
+    // Greedy selection: include entries until budget exhausted
+    const selected: StoreMemoryEntry[] = [];
+    let estimatedTokens = 0;
+
+    for (const { entry } of scored) {
+      // Rough token estimate: 1 token per 4 characters
+      const entryTokens = Math.ceil(entry.content.length / 4);
+
+      if (estimatedTokens + entryTokens <= tokenBudget) {
+        selected.push(entry);
+        estimatedTokens += entryTokens;
+      }
+    }
+
+    const coverage = `${selected.length}/${allMemoryEntries.length} entries selected (${estimatedTokens}K tokens)`;
+
+    return {
+      entries: selected,
+      coverage,
+      totalTokens: estimatedTokens,
+      selectedCount: selected.length,
+      totalCount: allMemoryEntries.length
+    };
+  }
+
+  /**
+   * Get base score for entry type (priority weighting)
+   */
+  private getTypeScore(fileType: StoreMemoryEntry['file_type']): number {
+    switch (fileType) {
+      case 'BRIEF':
+        return 1.5; // Project brief is always relevant
+      case 'PATTERN':
+        return 1.4; // System patterns are important
+      case 'CONTEXT':
+        return 1.3; // Active context is fairly important
+      case 'DECISION':
+        return 1.2; // Decisions inform current work
+      case 'PROGRESS':
+        return 1.0; // Progress entries are neutral
+      default:
+        return 0.8;
     }
   }
 
   /**
-   * Create backup on deactivate
+   * Get recency score for entry (time decay weighting)
    */
-  async createBackup(): Promise<boolean> {
-    if (!this._state.active || !this._state.path) return false;
-
+  private getRecencyScore(timestamp: string): number {
     try {
-      return await createBackupMarkdown(this._state.path, this._store);
-    } catch (err) {
-      console.error('[MemoryService] Backup failed:', err);
-      return false;
+      const entryDate = new Date(timestamp);
+      const now = new Date();
+      const ageMs = now.getTime() - entryDate.getTime();
+      const ageDays = ageMs / (1000 * 60 * 60 * 24);
+
+      if (ageDays < 7) {
+        return 1.0; // Last 7 days: full score
+      } else if (ageDays < 30) {
+        return 0.7; // 7-30 days: 70% score
+      } else if (ageDays < 90) {
+        return 0.3; // 30-90 days: 30% score
+      } else {
+        return 0.1; // Over 90 days: 10% score
+      }
+    } catch {
+      return 0.5; // Default if parsing fails
     }
   }
+
 }
 
 // Singleton instance

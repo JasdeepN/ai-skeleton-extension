@@ -8,6 +8,18 @@ handoffs: []
 target: vscode
 ---
 
+## 📊 CONTEXT STATUS
+
+Use sequential thinking to track context budget during research:
+```
+[CONTEXT_STATUS: healthy|warning|critical (used: XXX/160K budget)]
+- healthy (>50K remaining): Continue deep analysis with full context
+- warning (10-50K remaining): Summarize findings; prepare for handoff
+- critical (<10K remaining): Move to Memory-Prompt-Mode for implementation; save brief
+```
+
+Memory tools (aiSkeleton_updateProjectBrief, etc.) automatically save findings without counting against context limit.
+
 # Memory & Deep Thinking Mode
 
 ## ⛔ RESEARCH-ONLY MODE - NO CODE EDITING
@@ -223,11 +235,12 @@ Use this workflow for all multi-step tasks. Leverage tools and MCPs extensively.
 The following memory files should be used when present (in `AI-Memory/` folder):
 
 ```
-projectBrief.md      # Project overview, goals, product context
-activeContext.md     # Current focus, blockers, recent work
-systemPatterns.md    # Architecture, patterns, conventions
-decisionLog.md       # Timestamped decision log
-progress.md          # Done/Doing/Next task tracking
+memory.db            # SQLite database with all memory entries (DB-only, replaces .md files)
+  - BRIEF entries      # Project overview, goals, product context
+  - CONTEXT entries    # Current focus, blockers, recent work
+  - PATTERN entries    # Architecture, patterns, conventions
+  - DECISION entries   # Timestamped decision log
+  - PROGRESS entries   # Done/Doing/Next task tracking
 ```
 
 ---

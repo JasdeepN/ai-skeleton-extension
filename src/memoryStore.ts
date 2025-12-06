@@ -14,6 +14,26 @@ export interface MemoryEntry {
   content: string;
 }
 
+export interface TokenMetric {
+  id?: number;
+  timestamp: string; // ISO 8601
+  model: string; // e.g., "claude-3-5-sonnet"
+  input_tokens: number;
+  output_tokens: number;
+  total_tokens: number;
+  context_status?: 'healthy' | 'warning' | 'critical';
+  created_at?: string;
+}
+
+export interface QueryMetric {
+  id?: number;
+  timestamp: string; // ISO 8601
+  operation: string; // e.g., "queryByType", "appendEntry"
+  elapsed_ms: number; // query duration in milliseconds
+  result_count: number; // rows returned
+  created_at?: string;
+}
+
 // Mapping from uppercase tags to filenames
 export const FILE_TYPE_TO_FILENAME: Record<MemoryEntry['file_type'], string> = {
   CONTEXT: 'activeContext.md',
@@ -55,6 +75,10 @@ export class MemoryStore {
   private db: any = null;
   private isInitialized = false;
   private dbPath: string = '';
+  private querySamples: number[] = [];
+  private readonly maxSamples = 50;
+  private metricsLogCount = 0; // Counter for sampling-based logging
+  private readonly metricsLogSampleRate = 5; // Log 1 in 5 metrics by default
 
   /**
    * Initialize database connection
@@ -225,6 +249,41 @@ export class MemoryStore {
           
           CREATE INDEX IF NOT EXISTS idx_tag 
             ON entries(tag);
+
+          CREATE TABLE IF NOT EXISTS token_metrics (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp TEXT NOT NULL,
+            model TEXT NOT NULL,
+            input_tokens INTEGER NOT NULL,
+            output_tokens INTEGER NOT NULL,
+            total_tokens INTEGER NOT NULL,
+            context_status TEXT CHECK(context_status IN ('healthy', 'warning', 'critical')),
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+          );
+
+          CREATE INDEX IF NOT EXISTS idx_token_metrics_timestamp 
+            ON token_metrics(timestamp DESC);
+
+          CREATE INDEX IF NOT EXISTS idx_token_metrics_model 
+            ON token_metrics(model);
+
+          CREATE INDEX IF NOT EXISTS idx_token_metrics_status 
+            ON token_metrics(context_status);
+
+          CREATE TABLE IF NOT EXISTS query_metrics (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp TEXT NOT NULL,
+            operation TEXT NOT NULL,
+            elapsed_ms REAL NOT NULL,
+            result_count INTEGER NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+          );
+
+          CREATE INDEX IF NOT EXISTS idx_query_metrics_timestamp 
+            ON query_metrics(timestamp DESC);
+
+          CREATE INDEX IF NOT EXISTS idx_query_metrics_operation 
+            ON query_metrics(operation);
         `);
       } else if (this.backend === 'sql.js') {
         // sql.js uses run() for each statement
@@ -239,7 +298,35 @@ export class MemoryStore {
           `CREATE INDEX IF NOT EXISTS idx_file_timestamp 
             ON entries(file_type, timestamp DESC)`,
           `CREATE INDEX IF NOT EXISTS idx_tag 
-            ON entries(tag)`
+            ON entries(tag)`,
+          `CREATE TABLE IF NOT EXISTS token_metrics (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp TEXT NOT NULL,
+            model TEXT NOT NULL,
+            input_tokens INTEGER NOT NULL,
+            output_tokens INTEGER NOT NULL,
+            total_tokens INTEGER NOT NULL,
+            context_status TEXT CHECK(context_status IN ('healthy', 'warning', 'critical')),
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+          )`,
+          `CREATE INDEX IF NOT EXISTS idx_token_metrics_timestamp 
+            ON token_metrics(timestamp DESC)`,
+          `CREATE INDEX IF NOT EXISTS idx_token_metrics_model 
+            ON token_metrics(model)`,
+          `CREATE INDEX IF NOT EXISTS idx_token_metrics_status 
+            ON token_metrics(context_status)`,
+          `CREATE TABLE IF NOT EXISTS query_metrics (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp TEXT NOT NULL,
+            operation TEXT NOT NULL,
+            elapsed_ms REAL NOT NULL,
+            result_count INTEGER NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+          )`,
+          `CREATE INDEX IF NOT EXISTS idx_query_metrics_timestamp 
+            ON query_metrics(timestamp DESC)`,
+          `CREATE INDEX IF NOT EXISTS idx_query_metrics_operation 
+            ON query_metrics(operation)`
         ];
         
         for (const stmt of statements) {
@@ -260,6 +347,8 @@ export class MemoryStore {
    */
   async appendEntry(entry: Omit<MemoryEntry, 'id'>): Promise<number | null> {
     if (!this.db || !this.isInitialized) return null;
+
+    const start = Date.now();
 
     try {
       if (this.backend === 'better-sqlite3') {
@@ -286,7 +375,14 @@ export class MemoryStore {
       }
     } catch (err) {
       console.error('[MemoryStore] Append failed:', err);
+      return null;
+    } finally {
+      const elapsed = Date.now() - start;
+      this.recordTiming(elapsed);
+      // Log metric async with sampling (non-blocking)
+      this.logQueryMetricAsync('appendEntry', elapsed, 1);
     }
+
     return null;
   }
 
@@ -301,6 +397,8 @@ export class MemoryStore {
       return { entries: [], count: 0, error: 'Database not initialized' };
     }
 
+    const start = Date.now();
+
     try {
       if (this.backend === 'better-sqlite3') {
         const stmt = this.db.prepare(`
@@ -311,6 +409,9 @@ export class MemoryStore {
           LIMIT ?
         `);
         const entries = stmt.all(fileType, limit) as MemoryEntry[];
+        const elapsed = Date.now() - start;
+        this.recordTiming(elapsed);
+        this.logQueryMetricAsync('queryByType', elapsed, entries.length);
         return { entries, count: entries.length };
       } else if (this.backend === 'sql.js') {
         const stmt = this.db.prepare(`
@@ -326,10 +427,16 @@ export class MemoryStore {
           entries.push(stmt.getAsObject() as MemoryEntry);
         }
         stmt.free();
+        const elapsed = Date.now() - start;
+        this.recordTiming(elapsed);
+        this.logQueryMetricAsync('queryByType', elapsed, entries.length);
         return { entries, count: entries.length };
       }
     } catch (err) {
       console.error('[MemoryStore] Query by type failed:', err);
+      const elapsed = Date.now() - start;
+      this.recordTiming(elapsed);
+      this.logQueryMetricAsync('queryByType', elapsed, 0);
       return { entries: [], count: 0, error: String(err) };
     }
 
@@ -348,6 +455,8 @@ export class MemoryStore {
       return { entries: [], count: 0, error: 'Database not initialized' };
     }
 
+    const start = Date.now();
+
     try {
       if (this.backend === 'better-sqlite3') {
         const stmt = this.db.prepare(`
@@ -357,6 +466,9 @@ export class MemoryStore {
           ORDER BY timestamp DESC
         `);
         const entries = stmt.all(fileType, startDate, endDate) as MemoryEntry[];
+        const elapsed = Date.now() - start;
+        this.recordTiming(elapsed);
+        this.logQueryMetricAsync('queryByDateRange', elapsed, entries.length);
         return { entries, count: entries.length };
       } else if (this.backend === 'sql.js') {
         const stmt = this.db.prepare(`
@@ -371,10 +483,16 @@ export class MemoryStore {
           entries.push(stmt.getAsObject() as MemoryEntry);
         }
         stmt.free();
+        const elapsed = Date.now() - start;
+        this.recordTiming(elapsed);
+        this.logQueryMetricAsync('queryByDateRange', elapsed, entries.length);
         return { entries, count: entries.length };
       }
     } catch (err) {
       console.error('[MemoryStore] Date range query failed:', err);
+      const elapsed = Date.now() - start;
+      this.recordTiming(elapsed);
+      this.logQueryMetricAsync('queryByDateRange', elapsed, 0);
       return { entries: [], count: 0, error: String(err) };
     }
 
@@ -389,6 +507,8 @@ export class MemoryStore {
       return { entries: [], count: 0, error: 'Database not initialized' };
     }
 
+    const start = Date.now();
+
     try {
       if (this.backend === 'better-sqlite3') {
         const stmt = this.db.prepare(`
@@ -399,6 +519,9 @@ export class MemoryStore {
           LIMIT ?
         `);
         const entries = stmt.all(`%${query}%`, limit) as MemoryEntry[];
+        const elapsed = Date.now() - start;
+        this.recordTiming(elapsed);
+        this.logQueryMetricAsync('fullTextSearch', elapsed, entries.length);
         return { entries, count: entries.length };
       } else if (this.backend === 'sql.js') {
         const stmt = this.db.prepare(`
@@ -414,10 +537,16 @@ export class MemoryStore {
           entries.push(stmt.getAsObject() as MemoryEntry);
         }
         stmt.free();
+        const elapsed = Date.now() - start;
+        this.recordTiming(elapsed);
+        this.logQueryMetricAsync('fullTextSearch', elapsed, entries.length);
         return { entries, count: entries.length };
       }
     } catch (err) {
       console.error('[MemoryStore] Full-text search failed:', err);
+      const elapsed = Date.now() - start;
+      this.recordTiming(elapsed);
+      this.logQueryMetricAsync('fullTextSearch', elapsed, 0);
       return { entries: [], count: 0, error: String(err) };
     }
 
@@ -433,6 +562,163 @@ export class MemoryStore {
   ): Promise<MemoryEntry[]> {
     const result = await this.queryByType(fileType, count);
     return result.entries;
+  }
+
+  /**
+   * Count entries grouped by file type
+   */
+  async getEntryCounts(): Promise<Record<MemoryEntry['file_type'], number>> {
+    const counts: Record<MemoryEntry['file_type'], number> = {
+      CONTEXT: 0,
+      DECISION: 0,
+      PROGRESS: 0,
+      PATTERN: 0,
+      BRIEF: 0
+    };
+
+    if (!this.db || !this.isInitialized) return counts;
+
+    try {
+      if (this.backend === 'better-sqlite3') {
+        const stmt = this.db.prepare(`
+          SELECT file_type, COUNT(*) as count
+          FROM entries
+          GROUP BY file_type
+        `);
+        const rows = stmt.all() as { file_type: MemoryEntry['file_type']; count: number }[];
+        for (const row of rows) {
+          counts[row.file_type] = row.count;
+        }
+        return counts;
+      } else if (this.backend === 'sql.js') {
+        const stmt = this.db.prepare(`
+          SELECT file_type, COUNT(*) as count
+          FROM entries
+          GROUP BY file_type
+        `);
+        const rows: { file_type: MemoryEntry['file_type']; count: number }[] = [];
+        while (stmt.step()) {
+          const obj = stmt.getAsObject() as { file_type: MemoryEntry['file_type']; count: number };
+          rows.push(obj);
+        }
+        stmt.free();
+        for (const row of rows) {
+          counts[row.file_type] = Number(row.count) || 0;
+        }
+        return counts;
+      }
+    } catch (err) {
+      console.error('[MemoryStore] Count query failed:', err);
+      return counts;
+    }
+
+    return counts;
+  }
+
+  /**
+   * Get latest entries for a specific type (for dashboard preview)
+   */
+  async getLatestEntries(fileType: MemoryEntry['file_type'], limit: number = 5): Promise<MemoryEntry[]> {
+    if (!this.db || !this.isInitialized) return [];
+
+    try {
+      if (this.backend === 'better-sqlite3') {
+        const stmt = this.db.prepare(`
+          SELECT id, file_type, timestamp, tag, content
+          FROM entries
+          WHERE file_type = ?
+          ORDER BY timestamp DESC
+          LIMIT ?
+        `);
+        return stmt.all(fileType, limit) as MemoryEntry[];
+      } else if (this.backend === 'sql.js') {
+        const stmt = this.db.prepare(`
+          SELECT id, file_type, timestamp, tag, content
+          FROM entries
+          WHERE file_type = ?
+          ORDER BY timestamp DESC
+          LIMIT ?
+        `);
+        stmt.bind([fileType, limit]);
+        const entries: MemoryEntry[] = [];
+        while (stmt.step()) {
+          entries.push(stmt.getAsObject() as MemoryEntry);
+        }
+        stmt.free();
+        return entries;
+      }
+    } catch (err) {
+      console.error('[MemoryStore] Get latest entries failed:', err);
+      return [];
+    }
+
+    return [];
+  }
+
+  /**
+   * Get latest entry for a specific type (for metrics display)
+   */
+  async getLatestEntry(metricType: 'token_metrics' | 'query_metrics'): Promise<any | null> {
+    if (!this.db || !this.isInitialized) return null;
+
+    try {
+      if (metricType === 'token_metrics') {
+        if (this.backend === 'better-sqlite3') {
+          const stmt = this.db.prepare(`
+            SELECT id, timestamp, model, input_tokens, output_tokens, total_tokens, context_status, created_at
+            FROM token_metrics
+            ORDER BY timestamp DESC
+            LIMIT 1
+          `);
+          const result = stmt.get() as TokenMetric | undefined;
+          return result || null;
+        } else if (this.backend === 'sql.js') {
+          const stmt = this.db.prepare(`
+            SELECT id, timestamp, model, input_tokens, output_tokens, total_tokens, context_status, created_at
+            FROM token_metrics
+            ORDER BY timestamp DESC
+            LIMIT 1
+          `);
+          if (stmt.step()) {
+            const result = stmt.getAsObject() as TokenMetric;
+            stmt.free();
+            return result;
+          }
+          stmt.free();
+          return null;
+        }
+      } else if (metricType === 'query_metrics') {
+        if (this.backend === 'better-sqlite3') {
+          const stmt = this.db.prepare(`
+            SELECT id, timestamp, operation, elapsed_ms, result_count, created_at
+            FROM query_metrics
+            ORDER BY timestamp DESC
+            LIMIT 1
+          `);
+          const result = stmt.get() as QueryMetric | undefined;
+          return result || null;
+        } else if (this.backend === 'sql.js') {
+          const stmt = this.db.prepare(`
+            SELECT id, timestamp, operation, elapsed_ms, result_count, created_at
+            FROM query_metrics
+            ORDER BY timestamp DESC
+            LIMIT 1
+          `);
+          if (stmt.step()) {
+            const result = stmt.getAsObject() as QueryMetric;
+            stmt.free();
+            return result;
+          }
+          stmt.free();
+          return null;
+        }
+      }
+    } catch (err) {
+      console.error('[MemoryStore] Get latest entry failed:', err);
+      return null;
+    }
+
+    return null;
   }
 
   /**
@@ -488,10 +774,246 @@ export class MemoryStore {
   }
 
   /**
+   * Rolling average of recorded query timings in milliseconds
+   */
+  getAverageQueryTimeMs(): number | null {
+    if (!this.querySamples.length) return null;
+    const sum = this.querySamples.reduce((a, b) => a + b, 0);
+    return sum / this.querySamples.length;
+  }
+
+  private recordTiming(durationMs: number) {
+    if (Number.isFinite(durationMs)) {
+      this.querySamples.push(durationMs);
+      if (this.querySamples.length > this.maxSamples) {
+        this.querySamples.shift();
+      }
+    }
+  }
+
+  /**
    * Check if initialized
    */
   isReady(): boolean {
     return this.isInitialized;
+  }
+
+  /**
+   * Log a token usage metric
+   */
+  async logTokenMetric(metric: Omit<TokenMetric, 'id' | 'created_at'>): Promise<number | null> {
+    if (!this.db || !this.isInitialized) return null;
+
+    try {
+      if (this.backend === 'better-sqlite3') {
+        const stmt = this.db.prepare(`
+          INSERT INTO token_metrics (timestamp, model, input_tokens, output_tokens, total_tokens, context_status)
+          VALUES (?, ?, ?, ?, ?, ?)
+        `);
+        const result = stmt.run(
+          metric.timestamp,
+          metric.model,
+          metric.input_tokens,
+          metric.output_tokens,
+          metric.total_tokens,
+          metric.context_status || null
+        );
+        return result.lastInsertRowid as number;
+      } else if (this.backend === 'sql.js') {
+        this.db.run(
+          `INSERT INTO token_metrics (timestamp, model, input_tokens, output_tokens, total_tokens, context_status)
+           VALUES (?, ?, ?, ?, ?, ?)`,
+          [
+            metric.timestamp,
+            metric.model,
+            metric.input_tokens,
+            metric.output_tokens,
+            metric.total_tokens,
+            metric.context_status || null
+          ]
+        );
+        this.persistSqlJs();
+        return Math.floor(Date.now() / 1000);
+      }
+    } catch (err) {
+      console.error('[MemoryStore] Log token metric failed:', err);
+      return null;
+    }
+
+    return null;
+  }
+
+  /**
+   * Log a query performance metric
+   */
+  async logQueryMetric(
+    operation: string,
+    elapsed_ms: number,
+    result_count: number = 0
+  ): Promise<number | null> {
+    if (!this.db || !this.isInitialized) return null;
+
+    try {
+      if (this.backend === 'better-sqlite3') {
+        const stmt = this.db.prepare(`
+          INSERT INTO query_metrics (timestamp, operation, elapsed_ms, result_count)
+          VALUES (?, ?, ?, ?)
+        `);
+        const result = stmt.run(
+          new Date().toISOString(),
+          operation,
+          elapsed_ms,
+          result_count
+        );
+        return result.lastInsertRowid as number;
+      } else if (this.backend === 'sql.js') {
+        this.db.run(
+          `INSERT INTO query_metrics (timestamp, operation, elapsed_ms, result_count)
+           VALUES (?, ?, ?, ?)`,
+          [new Date().toISOString(), operation, elapsed_ms, result_count]
+        );
+        this.persistSqlJs();
+        return Math.floor(Date.now() / 1000);
+      }
+    } catch (err) {
+      console.error('[MemoryStore] Log query metric failed:', err);
+      return null;
+    }
+
+    return null;
+  }
+
+  /**
+   * Async log query metric with sampling (non-blocking)
+   * Uses sample-only logging to reduce DB write overhead (1 in N by default)
+   * Respects AISK_METRICS_DEBUG env var for 100% logging in development
+   */
+  logQueryMetricAsync(
+    operation: string,
+    elapsed_ms: number,
+    result_count: number = 0
+  ): void {
+    // Check if we should sample this metric
+    const debugMode = process.env.AISK_METRICS_DEBUG === 'true';
+    this.metricsLogCount++;
+
+    if (!debugMode && this.metricsLogCount % this.metricsLogSampleRate !== 0) {
+      return; // Skip this metric sample
+    }
+
+    // Log asynchronously to avoid blocking query execution
+    setImmediate(() => {
+      this.logQueryMetric(operation, elapsed_ms, result_count).catch((err) => {
+        console.error('[MemoryStore] Async metric logging failed:', err);
+      });
+    });
+  }
+
+  /**
+   * Get token metrics for a date range
+   */
+  async getTokenMetrics(days: number = 7): Promise<TokenMetric[]> {
+    if (!this.db || !this.isInitialized) return [];
+
+    try {
+      const startDate = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+
+      if (this.backend === 'better-sqlite3') {
+        const stmt = this.db.prepare(`
+          SELECT id, timestamp, model, input_tokens, output_tokens, total_tokens, context_status, created_at
+          FROM token_metrics
+          WHERE timestamp >= ?
+          ORDER BY timestamp DESC
+        `);
+        return stmt.all(startDate) as TokenMetric[];
+      } else if (this.backend === 'sql.js') {
+        const stmt = this.db.prepare(`
+          SELECT id, timestamp, model, input_tokens, output_tokens, total_tokens, context_status, created_at
+          FROM token_metrics
+          WHERE timestamp >= ?
+          ORDER BY timestamp DESC
+        `);
+        stmt.bind([startDate]);
+        const metrics: TokenMetric[] = [];
+        while (stmt.step()) {
+          metrics.push(stmt.getAsObject() as TokenMetric);
+        }
+        stmt.free();
+        return metrics;
+      }
+    } catch (err) {
+      console.error('[MemoryStore] Get token metrics failed:', err);
+      return [];
+    }
+
+    return [];
+  }
+
+  /**
+   * Get query metrics for a specific operation
+   */
+  async getQueryMetrics(operation: string, days: number = 7): Promise<QueryMetric[]> {
+    if (!this.db || !this.isInitialized) return [];
+
+    try {
+      const startDate = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+
+      if (this.backend === 'better-sqlite3') {
+        const stmt = this.db.prepare(`
+          SELECT id, timestamp, operation, elapsed_ms, result_count, created_at
+          FROM query_metrics
+          WHERE operation = ? AND timestamp >= ?
+          ORDER BY timestamp DESC
+        `);
+        return stmt.all(operation, startDate) as QueryMetric[];
+      } else if (this.backend === 'sql.js') {
+        const stmt = this.db.prepare(`
+          SELECT id, timestamp, operation, elapsed_ms, result_count, created_at
+          FROM query_metrics
+          WHERE operation = ? AND timestamp >= ?
+          ORDER BY timestamp DESC
+        `);
+        stmt.bind([operation, startDate]);
+        const metrics: QueryMetric[] = [];
+        while (stmt.step()) {
+          metrics.push(stmt.getAsObject() as QueryMetric);
+        }
+        stmt.free();
+        return metrics;
+      }
+    } catch (err) {
+      console.error('[MemoryStore] Get query metrics failed:', err);
+      return [];
+    }
+
+    return [];
+  }
+
+  /**
+   * Delete metrics older than retention days
+   */
+  async cleanupMetrics(tokenRetentionDays: number = 90, queryRetentionDays: number = 30): Promise<boolean> {
+    if (!this.db || !this.isInitialized) return false;
+
+    try {
+      const tokenCutoff = new Date(Date.now() - tokenRetentionDays * 24 * 60 * 60 * 1000).toISOString();
+      const queryCutoff = new Date(Date.now() - queryRetentionDays * 24 * 60 * 60 * 1000).toISOString();
+
+      if (this.backend === 'better-sqlite3') {
+        this.db.prepare(`DELETE FROM token_metrics WHERE timestamp < ?`).run(tokenCutoff);
+        this.db.prepare(`DELETE FROM query_metrics WHERE timestamp < ?`).run(queryCutoff);
+      } else if (this.backend === 'sql.js') {
+        this.db.run(`DELETE FROM token_metrics WHERE timestamp < ?`, [tokenCutoff]);
+        this.db.run(`DELETE FROM query_metrics WHERE timestamp < ?`, [queryCutoff]);
+        this.persistSqlJs();
+      }
+
+      console.log('[MemoryStore] Metrics cleaned up - token cutoff:', tokenCutoff, 'query cutoff:', queryCutoff);
+      return true;
+    } catch (err) {
+      console.error('[MemoryStore] Metrics cleanup failed:', err);
+      return false;
+    }
   }
 }
 
