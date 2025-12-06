@@ -44,6 +44,7 @@ jobs:
         run: npm ci
 
       - name: Verify embeddings are current
+        shell: bash
         run: |
           echo "Running embedding scripts to ensure latest content..."
           npm run embed-all
