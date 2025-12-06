@@ -269,8 +269,14 @@ jobs:
             echo "merge_attempted=true" >> $GITHUB_OUTPUT
             echo "✅ Fast-forward merge successful"
           else
-            # Try squash merge, catch conflicts
-            if git merge --squash origin/dev 2>&1 | tee merge_output.log; then
+            # Try squash merge
+            set +e  # Don't exit on error
+            git merge --squash origin/dev 2>&1 | tee merge_output.log
+            MERGE_EXIT=$?
+            set -e
+            
+            if [ $MERGE_EXIT -eq 0 ]; then
+              # Merge succeeded (no conflicts)
               if git diff-index --quiet HEAD --; then
                 echo "No changes to merge"
                 echo "merged=false" >> $GITHUB_OUTPUT
@@ -280,14 +286,22 @@ jobs:
               fi
               git commit -m "chore: merge dev → staging [$(date +'%Y-%m-%d')]"
               echo "merge_attempted=true" >> $GITHUB_OUTPUT
-            else
-              # Merge conflicts detected
+            elif grep -qi "conflict" merge_output.log || grep -qi "CONFLICT" merge_output.log; then
+              # Merge conflicts - expected, not a failure
               echo "merged=false" >> $GITHUB_OUTPUT
               echo "needs_manual=true" >> $GITHUB_OUTPUT
               echo "merge_attempted=false" >> $GITHUB_OUTPUT
-              echo "::error::Merge conflicts detected! Manual resolution required."
+              echo "⚠️ Merge conflicts detected. Manual merge required."
+              echo "::warning::Merge conflicts between dev and staging. Please resolve manually."
+              exit 0  # Exit successfully - conflicts are not a failure
+            else
+              # Merge command failed for unknown reason - REAL FAILURE
+              echo "merged=false" >> $GITHUB_OUTPUT
+              echo "needs_manual=true" >> $GITHUB_OUTPUT
+              echo "merge_attempted=false" >> $GITHUB_OUTPUT
+              echo "::error::Merge command failed unexpectedly!"
               cat merge_output.log
-              exit 1  # REAL FAILURE - conflicts
+              exit 1  # REAL FAILURE
             fi
           fi
           
@@ -298,11 +312,11 @@ jobs:
             echo "✅ Successfully merged dev to staging"
           else
             # Check if failure was due to branch protection
-            if grep -q "protected branch" push_output.log || grep -q "Required status check" push_output.log; then
+            if grep -qE "protected branch|Required status check|Enforce branch flow|GH006" push_output.log; then
               echo "merged=false" >> $GITHUB_OUTPUT
               echo "needs_manual=true" >> $GITHUB_OUTPUT
               echo "⚠️ Branch protection prevented auto-merge. Manual merge required."
-              echo "::warning::Auto-merge blocked by branch protection. Please merge dev to staging manually."
+              echo "::warning::Auto-merge blocked by branch protection (Enforce branch flow check required). Please merge dev to staging manually."
               exit 0  # Exit successfully, not a real failure
             else
               echo "merged=false" >> $GITHUB_OUTPUT
