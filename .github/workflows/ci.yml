@@ -110,8 +110,7 @@ jobs:
         if: matrix.os == 'ubuntu-latest' && matrix.node == '20.x'
         with:
           name: test-results
-          path: |
-            coverage/
+          path: coverage/
           retention-days: 7
 
   # ============================================
@@ -275,8 +274,8 @@ jobs:
       - name: Verify test results from dev CI
         if: steps.merge.outputs.merged == 'true'
         run: |
-          if [ ! -d ./test-results/coverage ]; then
-            echo "::error::Test coverage artifacts missing from dev CI"
+          if [ ! -d ./test-results ]; then
+            echo "::error::Test results artifacts missing from dev CI"
             exit 1
           fi
           echo "✅ Test artifacts verified from dev CI build"
