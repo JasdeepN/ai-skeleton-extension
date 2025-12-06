@@ -149,3 +149,7 @@
 [PROGRESS:2025-12-06] Done: - [x] Phase 4.4: Retention policy & cleanup on deactivation + clearMetrics command
 
 [PROGRESS:2025-12-06] Done: - [x] Metrics collection wiring: All 14 todos complete across Phases 1-4.4
+
+[PROGRESS:2025-12-06] Done: - [x] Release v0.2.0 staged and committed with git tag
+
+[PROGRESS:2025-12-06] Done: - [x] CI Tests fixed and passing - all 7 jobs successful (6 platform tests + smoke test)
