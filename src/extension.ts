@@ -1065,6 +1065,57 @@ export async function activate(context: vscode.ExtensionContext) {
     }
   }));
 
+  // View memory file (Decision Log, Context, Progress, Patterns, Brief)
+  context.subscriptions.push(vscode.commands.registerCommand('aiSkeleton.memory.viewFile', async (fileType: string) => {
+    try {
+      const memoryService = getMemoryService();
+      const entries = await memoryService.queryByType(fileType as any);
+      
+      if (entries.length === 0) {
+        vscode.window.showWarningMessage(`No entries found in ${fileType}`);
+        return;
+      }
+
+      // Format all entries with timestamps and tags
+      const fileTypeLabel = {
+        'DECISION': 'Decision Log',
+        'CONTEXT': 'Context History',
+        'PROGRESS': 'Progress Tracking',
+        'PATTERN': 'System Patterns',
+        'BRIEF': 'Project Brief'
+      }[fileType] || fileType;
+
+      // Build markdown content showing all entries
+      let content = `# ${fileTypeLabel}\n\n**Total entries: ${entries.length}**\n\n`;
+      
+      // Sort by timestamp descending (newest first)
+      const sorted = [...entries].sort((a, b) => {
+        const aTime = new Date(a.timestamp || 0).getTime();
+        const bTime = new Date(b.timestamp || 0).getTime();
+        return bTime - aTime;
+      });
+
+      for (const entry of sorted) {
+        const tag = (entry as any).tag ? ` - ${(entry as any).tag}` : '';
+        const date = entry.timestamp ? new Date(entry.timestamp).toLocaleDateString() : 'Unknown';
+        content += `## ${date}${tag}\n\n${entry.content}\n\n---\n\n`;
+      }
+
+      // Open in editor as preview (read-only)
+      const doc = await vscode.workspace.openTextDocument({
+        language: 'markdown',
+        content
+      });
+      
+      await vscode.window.showTextDocument(doc, {
+        preview: true,
+        preserveFocus: false
+      });
+    } catch (err) {
+      vscode.window.showErrorMessage(`Failed to open memory file: ${err}`);
+    }
+  }));
+
   // Start new task / context
   context.subscriptions.push(vscode.commands.registerCommand('aiSkeleton.context.newTask', async () => {
     const task = await vscode.window.showInputBox({

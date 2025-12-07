@@ -64,6 +64,7 @@ export class MemoryDashboardTreeProvider implements vscode.TreeDataProvider<Dash
         new DashboardTreeItem('Status', vscode.TreeItemCollapsibleState.Expanded, 'status', metrics),
         new DashboardTreeItem('Context Switching', vscode.TreeItemCollapsibleState.Expanded, 'context-switching'),
         new DashboardTreeItem('Metrics', vscode.TreeItemCollapsibleState.Expanded, 'metrics', metrics),
+        new DashboardTreeItem('Memory Bank', vscode.TreeItemCollapsibleState.Expanded, 'memory-bank'),
         new DashboardTreeItem('Semantic Search', vscode.TreeItemCollapsibleState.Expanded, 'semantic'),
         new DashboardTreeItem('Latest Entries', vscode.TreeItemCollapsibleState.Collapsed, 'latest', metrics),
         new DashboardTreeItem('Actions', vscode.TreeItemCollapsibleState.Expanded, 'actions')
@@ -79,6 +80,8 @@ export class MemoryDashboardTreeProvider implements vscode.TreeDataProvider<Dash
         return await this.buildPhaseHistoryItems(element.meta as string);
       case 'metrics':
         return await this.buildMetricsItems(element.meta as DashboardMetrics);
+      case 'memory-bank':
+        return await this.buildMemoryBankItems();
       case 'semantic':
         return await this.buildSemanticItems();
       case 'latest':
@@ -170,6 +173,51 @@ export class MemoryDashboardTreeProvider implements vscode.TreeDataProvider<Dash
     const countsParent = new DashboardTreeItem('Entry Counts', vscode.TreeItemCollapsibleState.Collapsed, 'counts-parent', metrics);
     countsParent.iconPath = new vscode.ThemeIcon('list-ordered');
     items.push(countsParent);
+
+    return items;
+  }
+
+  private async buildMemoryBankItems(): Promise<DashboardTreeItem[]> {
+    const items: DashboardTreeItem[] = [];
+
+    // Display all memory file types with entry counts
+    const memoryFiles = [
+      { type: 'DECISION' as const, label: '📋 Decision Log', icon: 'note' },
+      { type: 'CONTEXT' as const, label: '📍 Context', icon: 'symbol-event' },
+      { type: 'PROGRESS' as const, label: '✅ Progress', icon: 'checklist' },
+      { type: 'PATTERN' as const, label: '🔗 Patterns', icon: 'symbol-structure' },
+      { type: 'BRIEF' as const, label: '📚 Brief', icon: 'book' }
+    ];
+
+    for (const file of memoryFiles) {
+      try {
+        // Get count for this file type
+        const entries = await this.memoryService.queryByType(file.type);
+        const count = entries.length;
+        
+        const item = new DashboardTreeItem(
+          `${file.label} (${count})`,
+          vscode.TreeItemCollapsibleState.None,
+          'memory-file',
+          file.type
+        );
+        item.iconPath = new vscode.ThemeIcon(file.icon);
+        item.description = count > 0 ? 'Click to view' : 'Empty';
+        
+        // Click to open memory file in editor
+        if (count > 0) {
+          item.command = {
+            command: 'aiSkeleton.memory.viewFile',
+            title: `View ${file.label}`,
+            arguments: [file.type]
+          };
+        }
+        
+        items.push(item);
+      } catch (err) {
+        console.debug(`[MemoryDashboard] Failed to load ${file.type}:`, err);
+      }
+    }
 
     return items;
   }

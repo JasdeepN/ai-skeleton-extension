@@ -873,6 +873,23 @@ export class MemoryBankService {
   }
 
   /**
+   * Get all entries of a specific type
+   * @param type Memory entry file type (CONTEXT, DECISION, PROGRESS, PATTERN, BRIEF)
+   * @returns Array of entries sorted by timestamp (newest first)
+   */
+  async queryByType(type: StoreMemoryEntry['file_type']): Promise<StoreMemoryEntry[]> {
+    try {
+      const result = await this._store.queryByType(type, 1000);
+      const entries = result.entries || [];
+      // Sort by timestamp descending (newest first)
+      return entries.sort((a: any, b: any) => (b.timestamp || '').localeCompare(a.timestamp || ''));
+    } catch (e) {
+      console.error(`Error querying entries of type ${type}:`, e);
+      return [];
+    }
+  }
+
+  /**
    * Format a single memory entry for LM context (Markdown + YAML)
    * Optimized for token efficiency
    */
