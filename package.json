@@ -443,21 +443,6 @@
       ],
       "view/title": [
         {
-          "command": "aiSkeleton.diagnostics.refresh",
-          "when": "view == aiSkeletonDiagnostics",
-          "group": "navigation"
-        },
-        {
-          "command": "aiSkeleton.diagnostics.runSelfTest",
-          "when": "view == aiSkeletonDiagnostics",
-          "group": "navigation"
-        },
-        {
-          "command": "aiSkeleton.installAll",
-          "when": "view == aiSkeletonDiagnostics",
-          "group": "navigation"
-        },
-        {
           "command": "aiSkeleton.installPrompts",
           "when": "view == aiSkeletonPrompts",
           "group": "navigation"
