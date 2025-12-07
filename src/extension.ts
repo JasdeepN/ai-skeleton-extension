@@ -1016,6 +1016,56 @@ export async function activate(context: vscode.ExtensionContext) {
     }
   }));
 
+  // Clear current context
+  context.subscriptions.push(vscode.commands.registerCommand('aiSkeleton.context.clear', async () => {
+    const confirmed = await vscode.window.showWarningMessage(
+      'Clear current context?',
+      { modal: true },
+      'Yes', 'Cancel'
+    );
+    if (confirmed === 'Yes') {
+      try {
+        await memoryService.deleteEntry('CONTEXT', 'Current');
+        vscode.window.showInformationMessage('Context cleared');
+        dashboardProvider.refresh();
+      } catch (err) {
+        vscode.window.showErrorMessage(`Failed to clear context: ${err}`);
+      }
+    }
+  }));
+
+  // Start new task / context
+  context.subscriptions.push(vscode.commands.registerCommand('aiSkeleton.context.newTask', async () => {
+    const task = await vscode.window.showInputBox({
+      prompt: 'Enter new task/context description',
+      placeHolder: 'E.g., Implement feature X, Debug issue Y, etc.',
+      ignoreFocusOut: true
+    });
+
+    if (!task || !task.trim()) {
+      return;
+    }
+
+    try {
+      const today = new Date().toISOString().split('T')[0];
+      const timestamp = new Date().toISOString();
+      
+      await memoryService.appendEntry({
+        file_type: 'CONTEXT',
+        timestamp,
+        tag: `[TASK:${today}] ${task.trim()}`,
+        content: `Starting new task: ${task.trim()}\n\nInitial phase: research`,
+        phase: 'research',
+        progress_status: 'in-progress'
+      });
+
+      vscode.window.showInformationMessage(`New task created: ${task.trim()}`);
+      dashboardProvider.refresh();
+    } catch (err) {
+      vscode.window.showErrorMessage(`Failed to create task: ${err}`);
+    }
+  }));
+
   // Create memory bank
   context.subscriptions.push(vscode.commands.registerCommand('aiSkeleton.memory.create', async () => {
     const ws = vscode.workspace.workspaceFolders;
