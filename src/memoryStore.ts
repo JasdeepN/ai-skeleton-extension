@@ -193,9 +193,15 @@ export class MemoryStore {
       // Polyfill navigator to avoid issues with newer Node.js versions
       const globalObj = global as any;
       const hadNavigator = typeof globalObj.navigator !== 'undefined';
-      const oldNavigator = globalObj.navigator;
+      const oldNavigator = hadNavigator ? globalObj.navigator : undefined;
+      
       if (!hadNavigator) {
-        globalObj.navigator = {};
+        try {
+          globalObj.navigator = {};
+        } catch (navErr) {
+          console.warn('[MemoryStore] Could not polyfill navigator:', navErr);
+          // Continue anyway, might still work
+        }
       }
       
       try {
@@ -226,10 +232,14 @@ export class MemoryStore {
         throw sqlErr;
       } finally {
         // Restore navigator to original state
-        if (hadNavigator) {
-          globalObj.navigator = oldNavigator;
-        } else {
-          delete globalObj.navigator;
+        try {
+          if (hadNavigator) {
+            globalObj.navigator = oldNavigator;
+          } else {
+            delete globalObj.navigator;
+          }
+        } catch (navCleanupErr) {
+          console.warn('[MemoryStore] Could not restore navigator:', navCleanupErr);
         }
       }
     } catch (err) {
