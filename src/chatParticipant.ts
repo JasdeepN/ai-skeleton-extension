@@ -44,16 +44,15 @@ const handler: vscode.ChatRequestHandler = async (
   token: vscode.CancellationToken
 ) => {
   try {
-    // Get the selected language model
-    // request.model is provided by the chat system, but we need to ensure it's available
-    const model = request.model;
+    // Model Selection: Auto (intelligent default) with User Override
+    // 1. If user selected a specific model in the chat UI: request.model will be set → use it (user override)
+    // 2. If no user selection: request.model will be undefined → auto-select best available (default "auto")
+    let model = request.model;
     
     if (!model) {
-      // Fallback: try to select Claude model explicitly
-      const models = await vscode.lm.selectChatModels({
-        vendor: 'copilot',
-        family: 'gpt-4o'
-      });
+      // Auto mode: intelligently select the best available model
+      // VS Code's selectChatModels() returns models in priority order (best first)
+      const models = await vscode.lm.selectChatModels();
       
       if (!models || models.length === 0) {
         stream.markdown(
@@ -66,6 +65,9 @@ const handler: vscode.ChatRequestHandler = async (
         );
         return;
       }
+      
+      // Select the first (best) model from the available list (auto mode)
+      model = models[0];
     }
 
     // Filter tools to include only ai-skeleton memory tools

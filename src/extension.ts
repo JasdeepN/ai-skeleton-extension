@@ -132,10 +132,17 @@ export async function activate(context: vscode.ExtensionContext) {
   // Register @aiSkeleton chat participant for guaranteed tool invocation
   // This participant controls the tool calling loop and ensures tokens are tracked
   try {
+    // Debug: Check if chat API is available
+    const chatApiAvailable = !!(vscode.chat && vscode.chat.createChatParticipant);
+    console.log('[Extension] Chat API available:', chatApiAvailable);
+    console.log('[Extension] vscode.chat:', !!vscode.chat);
+    console.log('[Extension] vscode.chat.createChatParticipant:', !!vscode.chat?.createChatParticipant);
+    
     createChatParticipant(context);
     console.log('[Extension] @aiSkeleton chat participant registered');
   } catch (err) {
     console.error('[Extension] Failed to register chat participant:', err);
+    console.error('[Extension] Error details:', err instanceof Error ? err.message : String(err));
   }
 
   // Register memory tree view
