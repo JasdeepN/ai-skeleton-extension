@@ -169,6 +169,18 @@ export class MemoryDashboardTreeProvider implements vscode.TreeDataProvider<Dash
       console.debug('[MemoryDashboard] Failed to load token metrics:', err);
     }
 
+    // Vector Database Stats
+    if (metrics.vectorStats) {
+      const vectorItem = new DashboardTreeItem(
+        `Vector DB: ${metrics.vectorStats.embeddedCount}/${metrics.vectorStats.totalCount} (${metrics.vectorStats.coveragePercent}%)`,
+        vscode.TreeItemCollapsibleState.None,
+        'metric-item'
+      );
+      vectorItem.description = `${(metrics.vectorStats.storageBytesUsed / 1024).toFixed(1)} KB`;
+      vectorItem.iconPath = new vscode.ThemeIcon('circuit-board');
+      items.push(vectorItem);
+    }
+
     // Entry Counts
     const countsParent = new DashboardTreeItem('Entry Counts', vscode.TreeItemCollapsibleState.Collapsed, 'counts-parent', metrics);
     countsParent.iconPath = new vscode.ThemeIcon('list-ordered');

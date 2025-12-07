@@ -36,6 +36,12 @@ export interface DashboardMetrics {
   entryCounts: Record<StoreMemoryEntry['file_type'], number>;
   latest: Record<StoreMemoryEntry['file_type'], Array<Pick<StoreMemoryEntry, 'tag' | 'content' | 'timestamp'>>>;
   tasks: DashboardTasksSnapshot;
+  vectorStats?: {
+    embeddedCount: number;
+    totalCount: number;
+    coveragePercent: number;
+    storageBytesUsed: number;
+  };
 }
 
 // SQLite is the single source of truth - no markdown files tracked
@@ -591,13 +597,32 @@ export class MemoryBankService {
       }
     }
 
+    // Calculate vector database stats
+    let vectorStats: DashboardMetrics['vectorStats'] | undefined;
+    try {
+      const totalCount = Object.values(entryCounts).reduce((a, b) => a + b, 0);
+      const embeddedCount = await this._store.countEntriesWithEmbeddings();
+      
+      if (totalCount > 0) {
+        vectorStats = {
+          embeddedCount,
+          totalCount,
+          coveragePercent: Math.round((embeddedCount / totalCount) * 100),
+          storageBytesUsed: embeddedCount * 48 // Each quantized embedding is 48 bytes
+        };
+      }
+    } catch (err) {
+      console.debug('[MemoryService] Failed to calculate vector stats:', err);
+    }
+
     return {
       state,
       dbSizeBytes,
       avgQueryTimeMs: this._store.getAverageQueryTimeMs(),
       entryCounts,
       latest,
-      tasks
+      tasks,
+      vectorStats
     };
   }
 

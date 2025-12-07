@@ -1015,6 +1015,41 @@ export class MemoryStore {
   }
 
   /**
+   * Count entries that have embeddings
+   */
+  async countEntriesWithEmbeddings(): Promise<number> {
+    if (!this.db || !this.isInitialized) return 0;
+
+    try {
+      if (this.backend === 'better-sqlite3') {
+        const stmt = this.db.prepare(`
+          SELECT COUNT(*) as count
+          FROM entries
+          WHERE embedding IS NOT NULL
+        `);
+        const result = stmt.get() as { count: number };
+        return result.count;
+      } else if (this.backend === 'sql.js') {
+        const stmt = this.db.prepare(`
+          SELECT COUNT(*) as count
+          FROM entries
+          WHERE embedding IS NOT NULL
+        `);
+        let count = 0;
+        if (stmt.step()) {
+          const obj = stmt.getAsObject();
+          count = obj.count as number;
+        }
+        stmt.free();
+        return count;
+      }
+    } catch (err) {
+      console.error('[MemoryStore] Count entries with embeddings failed:', err);
+    }
+    return 0;
+  }
+
+  /**
    * Rolling average of recorded query timings in milliseconds
    */
   getAverageQueryTimeMs(): number | null {
