@@ -12,6 +12,9 @@ export interface MemoryEntry {
   timestamp: string; // ISO 8601
   tag: string; // e.g., "CONTEXT:2025-12-04"
   content: string;
+  metadata?: string; // JSON: {progress?: string, targets?: string[], phase?: string}
+  phase?: 'research' | 'planning' | 'execution' | 'checkpoint' | null;
+  progress_status?: 'done' | 'in-progress' | 'draft' | 'deprecated' | null;
 }
 
 export interface TokenMetric {
@@ -244,7 +247,10 @@ export class MemoryStore {
             file_type TEXT NOT NULL CHECK(file_type IN ('CONTEXT', 'DECISION', 'PROGRESS', 'PATTERN', 'BRIEF')),
             timestamp TEXT NOT NULL,
             tag TEXT NOT NULL,
-            content TEXT NOT NULL
+            content TEXT NOT NULL,
+            metadata TEXT DEFAULT '{}',
+            phase TEXT DEFAULT NULL,
+            progress_status TEXT DEFAULT NULL
           );
 
           CREATE INDEX IF NOT EXISTS idx_file_timestamp 
@@ -288,7 +294,10 @@ export class MemoryStore {
             file_type TEXT NOT NULL CHECK(file_type IN ('CONTEXT', 'DECISION', 'PROGRESS', 'PATTERN', 'BRIEF')),
             timestamp TEXT NOT NULL,
             tag TEXT NOT NULL,
-            content TEXT NOT NULL
+            content TEXT NOT NULL,
+            metadata TEXT DEFAULT '{}',
+            phase TEXT DEFAULT NULL,
+            progress_status TEXT DEFAULT NULL
           )`,
           `CREATE INDEX IF NOT EXISTS idx_file_timestamp 
             ON entries(file_type, timestamp DESC)`,
@@ -342,27 +351,112 @@ export class MemoryStore {
     if (!this.db || !this.isInitialized) return;
 
     try {
-      // Migration 1: Add operation column to token_metrics if it doesn't exist
       if (this.backend === 'better-sqlite3') {
-        // Check if operation column exists
-        const tableInfo = this.db.prepare('PRAGMA table_info(token_metrics)').all() as Array<{name: string}>;
-        const hasOperation = tableInfo.some(col => col.name === 'operation');
+        // Check existing columns
+        const tableInfo = this.db.prepare('PRAGMA table_info(entries)').all() as Array<{name: string}>;
+        const columnNames = new Set(tableInfo.map(col => col.name));
+        
+        // Migration 1: Add metadata column if missing
+        if (!columnNames.has('metadata')) {
+          console.log('[MemoryStore] Running migration: Adding metadata column to entries');
+          try {
+            this.db.prepare('ALTER TABLE entries ADD COLUMN metadata TEXT DEFAULT \'{}\'').run();
+          } catch (e) {
+            console.warn('[MemoryStore] metadata column already exists or migration failed:', e);
+          }
+        }
+        
+        // Migration 2: Add phase column if missing
+        if (!columnNames.has('phase')) {
+          console.log('[MemoryStore] Running migration: Adding phase column to entries');
+          try {
+            this.db.prepare('ALTER TABLE entries ADD COLUMN phase TEXT DEFAULT NULL').run();
+          } catch (e) {
+            console.warn('[MemoryStore] phase column already exists or migration failed:', e);
+          }
+        }
+        
+        // Migration 3: Add progress_status column if missing
+        if (!columnNames.has('progress_status')) {
+          console.log('[MemoryStore] Running migration: Adding progress_status column to entries');
+          try {
+            this.db.prepare('ALTER TABLE entries ADD COLUMN progress_status TEXT DEFAULT NULL').run();
+          } catch (e) {
+            console.warn('[MemoryStore] progress_status column already exists or migration failed:', e);
+          }
+        }
+        
+        // Migration 4: Add operation column to token_metrics if it doesn't exist
+        const tokenMetricsInfo = this.db.prepare('PRAGMA table_info(token_metrics)').all() as Array<{name: string}>;
+        const hasOperation = tokenMetricsInfo.some(col => col.name === 'operation');
         
         if (!hasOperation) {
           console.log('[MemoryStore] Running migration: Adding operation column to token_metrics');
-          this.db.prepare('ALTER TABLE token_metrics ADD COLUMN operation TEXT').run();
+          try {
+            this.db.prepare('ALTER TABLE token_metrics ADD COLUMN operation TEXT').run();
+          } catch (e) {
+            console.warn('[MemoryStore] operation column already exists:', e);
+          }
         }
       } else if (this.backend === 'sql.js') {
-        // Check if operation column exists
-        const tableInfo = this.db.exec('PRAGMA table_info(token_metrics)');
+        // Check existing columns
+        const tableInfo = this.db.exec('PRAGMA table_info(entries)');
+        const columnNames = new Set<string>();
         if (tableInfo.length > 0) {
-          const columns = tableInfo[0].values.map((row: any) => row[1] as string);
-          const hasOperation = columns.includes('operation');
-          
-          if (!hasOperation) {
-            console.log('[MemoryStore] Running migration: Adding operation column to token_metrics');
+          tableInfo[0].values.forEach((row: any) => {
+            columnNames.add(row[1] as string);
+          });
+        }
+        
+        // Migration 1: Add metadata column if missing
+        if (!columnNames.has('metadata')) {
+          console.log('[MemoryStore] Running migration: Adding metadata column to entries');
+          try {
+            this.db.run('ALTER TABLE entries ADD COLUMN metadata TEXT DEFAULT \'{}\'');
+            this.persistSqlJs();
+          } catch (e) {
+            console.warn('[MemoryStore] metadata column migration failed:', e);
+          }
+        }
+        
+        // Migration 2: Add phase column if missing
+        if (!columnNames.has('phase')) {
+          console.log('[MemoryStore] Running migration: Adding phase column to entries');
+          try {
+            this.db.run('ALTER TABLE entries ADD COLUMN phase TEXT DEFAULT NULL');
+            this.persistSqlJs();
+          } catch (e) {
+            console.warn('[MemoryStore] phase column migration failed:', e);
+          }
+        }
+        
+        // Migration 3: Add progress_status column if missing
+        if (!columnNames.has('progress_status')) {
+          console.log('[MemoryStore] Running migration: Adding progress_status column to entries');
+          try {
+            this.db.run('ALTER TABLE entries ADD COLUMN progress_status TEXT DEFAULT NULL');
+            this.persistSqlJs();
+          } catch (e) {
+            console.warn('[MemoryStore] progress_status column migration failed:', e);
+          }
+        }
+        
+        // Migration 4: Add operation column to token_metrics if missing
+        const tokenTableInfo = this.db.exec('PRAGMA table_info(token_metrics)');
+        const tokenColumnNames = new Set<string>();
+        if (tokenTableInfo.length > 0) {
+          tokenTableInfo[0].values.forEach((row: any) => {
+            tokenColumnNames.add(row[1] as string);
+          });
+        }
+        
+        if (!tokenColumnNames.has('operation')) {
+          console.log('[MemoryStore] Running migration: Adding operation column to token_metrics');
+          try {
             this.db.run('ALTER TABLE token_metrics ADD COLUMN operation TEXT');
             this.persistSqlJs();
+          } catch (e) {
+            console.warn('[MemoryStore] operation column migration failed:', e);
           }
         }
       }
@@ -380,21 +474,24 @@ export class MemoryStore {
     try {
       if (this.backend === 'better-sqlite3') {
         const stmt = this.db.prepare(`
-          INSERT INTO entries (file_type, timestamp, tag, content)
-          VALUES (?, ?, ?, ?)
+          INSERT INTO entries (file_type, timestamp, tag, content, metadata, phase, progress_status)
+          VALUES (?, ?, ?, ?, ?, ?, ?)
         `);
         const result = stmt.run(
           entry.file_type,
           entry.timestamp,
           entry.tag,
-          entry.content
+          entry.content,
+          entry.metadata ?? '{}',
+          entry.phase ?? null,
+          entry.progress_status ?? null
         );
         return result.lastInsertRowid as number;
       } else if (this.backend === 'sql.js') {
         this.db.run(
-          `INSERT INTO entries (file_type, timestamp, tag, content)
-           VALUES (?, ?, ?, ?)`,
-          [entry.file_type, entry.timestamp, entry.tag, entry.content]
+          `INSERT INTO entries (file_type, timestamp, tag, content, metadata, phase, progress_status)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          [entry.file_type, entry.timestamp, entry.tag, entry.content, entry.metadata ?? '{}', entry.phase ?? null, entry.progress_status ?? null]
         );
         this.persistSqlJs();
         // sql.js doesn't easily return lastInsertRowid
@@ -420,7 +517,7 @@ export class MemoryStore {
     try {
       if (this.backend === 'better-sqlite3') {
         const stmt = this.db.prepare(`
-          SELECT id, file_type, timestamp, tag, content
+          SELECT id, file_type, timestamp, tag, content, metadata, phase, progress_status
           FROM entries
           WHERE file_type = ?
           ORDER BY timestamp DESC
@@ -430,7 +527,7 @@ export class MemoryStore {
         return { entries, count: entries.length };
       } else if (this.backend === 'sql.js') {
         const stmt = this.db.prepare(`
-          SELECT id, file_type, timestamp, tag, content
+          SELECT id, file_type, timestamp, tag, content, metadata, phase, progress_status
           FROM entries
           WHERE file_type = ?
           ORDER BY timestamp DESC
@@ -467,7 +564,7 @@ export class MemoryStore {
     try {
       if (this.backend === 'better-sqlite3') {
         const stmt = this.db.prepare(`
-          SELECT id, file_type, timestamp, tag, content
+          SELECT id, file_type, timestamp, tag, content, metadata, phase, progress_status
           FROM entries
           WHERE file_type = ? AND timestamp >= ? AND timestamp < ?
           ORDER BY timestamp DESC
@@ -476,7 +573,7 @@ export class MemoryStore {
         return { entries, count: entries.length };
       } else if (this.backend === 'sql.js') {
         const stmt = this.db.prepare(`
-          SELECT id, file_type, timestamp, tag, content
+          SELECT id, file_type, timestamp, tag, content, metadata, phase, progress_status
           FROM entries
           WHERE file_type = ? AND timestamp >= ? AND timestamp < ?
           ORDER BY timestamp DESC
@@ -508,7 +605,7 @@ export class MemoryStore {
     try {
       if (this.backend === 'better-sqlite3') {
         const stmt = this.db.prepare(`
-          SELECT id, file_type, timestamp, tag, content
+          SELECT id, file_type, timestamp, tag, content, metadata, phase, progress_status
           FROM entries
           WHERE content LIKE ?
           ORDER BY timestamp DESC
@@ -518,7 +615,7 @@ export class MemoryStore {
         return { entries, count: entries.length };
       } else if (this.backend === 'sql.js') {
         const stmt = this.db.prepare(`
-          SELECT id, file_type, timestamp, tag, content
+          SELECT id, file_type, timestamp, tag, content, metadata, phase, progress_status
           FROM entries
           WHERE content LIKE ?
           ORDER BY timestamp DESC
