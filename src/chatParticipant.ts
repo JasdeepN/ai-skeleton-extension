@@ -44,31 +44,28 @@ const handler: vscode.ChatRequestHandler = async (
   token: vscode.CancellationToken
 ) => {
   try {
-    // Model Selection: Auto (intelligent default) with User Override
-    // 1. If user selected a specific model in the chat UI: request.model will be set → use it (user override)
-    // 2. If no user selection: request.model will be undefined → auto-select best available (default "auto")
-    let model = request.model;
+    // Model Selection: Always select a real model via selectChatModels()
+    // request.model from chat UI may be "auto" which isn't a valid endpoint
+    // We must explicitly select an available model to get a working endpoint
+    const models = await vscode.lm.selectChatModels({
+      vendor: 'copilot'
+    });
     
-    if (!model) {
-      // Auto mode: intelligently select the best available model
-      // VS Code's selectChatModels() returns models in priority order (best first)
-      const models = await vscode.lm.selectChatModels();
-      
-      if (!models || models.length === 0) {
-        stream.markdown(
-          '🤖 **No Language Model Available**\n\n' +
-          'The @aiSkeleton chat participant requires a language model to be available. ' +
-          'Please ensure:\n' +
-          '- GitHub Copilot is installed and enabled\n' +
-          '- You are signed in to GitHub\n' +
-          '- A chat model is available in your VS Code instance'
-        );
-        return;
-      }
-      
-      // Select the first (best) model from the available list (auto mode)
-      model = models[0];
+    if (!models || models.length === 0) {
+      stream.markdown(
+        '🤖 **No Language Model Available**\n\n' +
+        'The @aiSkeleton chat participant requires a language model to be available. ' +
+        'Please ensure:\n' +
+        '- GitHub Copilot is installed and enabled\n' +
+        '- You are signed in to GitHub\n' +
+        '- A chat model is available in your VS Code instance'
+      );
+      return;
     }
+    
+    // Use the first available Copilot model
+    const model = models[0];
+    console.log('[ChatParticipant] Using model:', model.id, model.vendor, model.family);
 
     // Filter tools to include only ai-skeleton memory tools
     const allTools = vscode.lm.tools;
