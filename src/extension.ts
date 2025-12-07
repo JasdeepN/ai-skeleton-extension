@@ -13,6 +13,8 @@ import { registerDiagnosticsView } from './diagnosticsProvider';
 import { maybeAutoStartMCPs, startMCPServers } from './mcpManager';
 import { showSetupDialog, checkForUpdates, reinstallAll } from './setupService';
 import { TokenCounterService } from './tokenCounterService';
+import { getMetricsService } from './metricsService';
+import { createChatParticipant } from './chatParticipant';
 
 async function resolvePrompts(): Promise<Prompt[]> {
   const source = vscode.workspace.getConfiguration().get<'auto'|'embedded'|'workspace'>('aiSkeleton.prompts.source', 'auto');
@@ -127,6 +129,15 @@ export async function activate(context: vscode.ExtensionContext) {
   // Commands below provide manual/programmatic alternatives
   registerMemoryTools(context);
 
+  // Register @aiSkeleton chat participant for guaranteed tool invocation
+  // This participant controls the tool calling loop and ensures tokens are tracked
+  try {
+    createChatParticipant(context);
+    console.log('[Extension] @aiSkeleton chat participant registered');
+  } catch (err) {
+    console.error('[Extension] Failed to register chat participant:', err);
+  }
+
   // Register memory tree view
   const { treeView: memoryTreeView, provider: memoryTreeProvider } = registerMemoryTreeView(context);
 
@@ -171,30 +182,64 @@ export async function activate(context: vscode.ExtensionContext) {
   memoryStatusBar.show();
   context.subscriptions.push(memoryStatusBar);
 
-    // Context budget status bar - displays token usage and remaining budget
+  // Context budget status bar - displays token usage and remaining budget
   const contextBudgetStatusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 8);
-  contextBudgetStatusBar.command = 'aiSkeleton.memory.showStatus';
-  const updateContextBudget = () => {
-    const metrics = tokenCounterService.getMetrics();
-    const cacheStats = tokenCounterService.getCacheStats();
-    
-    if (metrics.buffered === 0 && cacheStats.size === 0) {
-      contextBudgetStatusBar.text = '$(pie-chart) Budget: Ready';
-      contextBudgetStatusBar.tooltip = 'No agent calls yet. Budget: 200K tokens';
-      contextBudgetStatusBar.backgroundColor = undefined;
-    } else {
-      // Show cache stats as a proxy for usage
-      contextBudgetStatusBar.text = `$(pie-chart) Cache: ${cacheStats.size}`;
-      contextBudgetStatusBar.tooltip = `Token Cache: ${cacheStats.size} entries\\nBuffered metrics: ${metrics.buffered}`;
-      contextBudgetStatusBar.backgroundColor = undefined;
+  contextBudgetStatusBar.command = 'aiSkeleton.context.showUsage';
+
+  const metricsService = getMetricsService();
+  const CONTEXT_WINDOW = 200_000; // Default context window
+
+  const formatTokens = (value: number) => {
+    if (value >= 1000) {
+      const normalized = value / 1000;
+      return `${normalized >= 100 ? normalized.toFixed(0) : normalized.toFixed(1)}K`;
+    }
+    return `${value}`;
+  };
+
+  const updateContextBudget = async () => {
+    try {
+      const latestMetric = await metricsService.getLatestTokenMetric();
+      const usedTokens = latestMetric?.total_tokens ?? 0;
+      const budget = tokenCounterService.getContextBudget(usedTokens, CONTEXT_WINDOW);
+
+      const statusIcon: Record<typeof budget.status, string> = {
+        healthy: '$(check)',
+        warning: '$(alert)',
+        critical: '$(flame)'
+      };
+
+      contextBudgetStatusBar.text = `${statusIcon[budget.status]} Ctx ${formatTokens(budget.remaining)} / ${formatTokens(budget.total)} left`;
+      contextBudgetStatusBar.tooltip = [
+        `Context status: ${budget.status.toUpperCase()}`,
+        `Used: ${formatTokens(budget.used)} / ${formatTokens(budget.total)} (${budget.percentUsed.toFixed(1)}%)`,
+        `Remaining: ${formatTokens(budget.remaining)}`,
+        budget.recommendations.join('\n')
+      ].join('\n');
+
+      if (budget.status === 'critical') {
+        contextBudgetStatusBar.backgroundColor = new vscode.ThemeColor('statusBarItem.errorBackground');
+      } else if (budget.status === 'warning') {
+        contextBudgetStatusBar.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');
+      } else {
+        contextBudgetStatusBar.backgroundColor = undefined;
+      }
+    } catch (err) {
+      console.error('[Extension] Failed to update context budget status bar:', err);
+      contextBudgetStatusBar.text = '$(pie-chart) Budget: Unknown';
+      contextBudgetStatusBar.tooltip = 'Unable to retrieve context budget. See logs for details.';
+      contextBudgetStatusBar.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');
     }
   };
+
   updateContextBudget();
   contextBudgetStatusBar.show();
   context.subscriptions.push(contextBudgetStatusBar);
 
   // Update budget status bar periodically
-  const budgetUpdateInterval = setInterval(updateContextBudget, 5000);
+  const budgetUpdateInterval = setInterval(() => {
+    void updateContextBudget();
+  }, 5000);
   context.subscriptions.push({ dispose: () => clearInterval(budgetUpdateInterval) });
 
   // Listen for memory state changes
@@ -882,6 +927,65 @@ export async function activate(context: vscode.ExtensionContext) {
   // ========================================
 
   // Show memory status
+  // Show context usage breakdown by tool
+  context.subscriptions.push(vscode.commands.registerCommand('aiSkeleton.context.showUsage', async () => {
+    try {
+      const toolMetrics = await metricsService.getToolMetrics(7);
+      const latestMetric = await metricsService.getLatestTokenMetric();
+      
+      if (Object.keys(toolMetrics).length === 0) {
+        vscode.window.showInformationMessage(
+          'No token usage data available yet. Token tracking starts after using LM tools.',
+          'OK'
+        );
+        return;
+      }
+
+      // Sort tools by total tokens (highest first)
+      const sorted = Object.entries(toolMetrics)
+        .sort(([, a], [, b]) => b.totalTokens - a.totalTokens);
+
+      const lines: string[] = [
+        '📊 Token Usage by Tool (Last 7 Days)',
+        '═'.repeat(50),
+        ''
+      ];
+
+      let grandTotal = 0;
+      let grandCalls = 0;
+
+      for (const [tool, stats] of sorted) {
+        const percentage = latestMetric?.total_tokens 
+          ? ((stats.totalTokens / latestMetric.total_tokens) * 100).toFixed(1)
+          : '0.0';
+        
+        lines.push(
+          `${tool}:`,
+          `  Calls: ${stats.count}`,
+          `  Total: ${formatTokens(stats.totalTokens)} tokens`,
+          `  Average: ${formatTokens(stats.averageTokens)} tokens/call`,
+          ''
+        );
+        
+        grandTotal += stats.totalTokens;
+        grandCalls += stats.count;
+      }
+
+      lines.push(
+        '─'.repeat(50),
+        `Total: ${grandCalls} calls, ${formatTokens(grandTotal)} tokens`,
+        `Current Budget: ${latestMetric?.total_tokens ? formatTokens(latestMetric.total_tokens) : 'N/A'} used`
+      );
+
+      const panel = vscode.window.createOutputChannel('AI Skeleton: Token Usage', { log: true });
+      panel.clear();
+      panel.appendLine(lines.join('\n'));
+      panel.show();
+    } catch (err) {
+      vscode.window.showErrorMessage(`Failed to retrieve token usage: ${err}`);
+    }
+  }));
+
   context.subscriptions.push(vscode.commands.registerCommand('aiSkeleton.memory.showStatus', async () => {
     const state = memoryService.state;
     if (state.active) {

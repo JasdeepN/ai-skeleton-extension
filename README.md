@@ -106,7 +106,48 @@ aiSkeleton_updateProgress({
 })
 ```
 
-### 2. Memory Bank Structure
+### 2. @aiSkeleton Chat Participant
+
+New in v0.2.35: A dedicated chat participant that guarantees memory tool invocation and automatic token tracking.
+
+**How It Works:**
+
+Type `@aiSkeleton` in Copilot chat to interact with a memory-aware AI assistant:
+
+```
+@aiSkeleton What was our last database optimization decision?
+```
+
+The @aiSkeleton participant:
+1. **Automatically uses memory tools** - Invokes `showMemory`, `logDecision`, etc. based on conversation context
+2. **Tracks token usage** - Every tool invocation is logged for visibility
+3. **Provides suggestions** - Followup suggestions for related memories and actions
+4. **Handles errors gracefully** - Shows helpful messages if Copilot unavailable or quota exceeded
+
+**Example Conversation:**
+
+```
+You: @aiSkeleton What patterns have we documented for database queries?
+
+@aiSkeleton:
+1. Invokes aiSkeleton_showMemory tool
+2. Retrieves patterns tagged with "database"
+3. Summarizes key patterns
+4. Suggests: "Log a Decision about query optimization?"
+```
+
+**Benefits:**
+- ✅ Natural language interface to project memory
+- ✅ Automatic token counting per tool invocation
+- ✅ Memory-aware responses from AI
+- ✅ Guaranteed tool invocation (unlike default Copilot)
+- ✅ Persistent context across conversations
+
+**Status Bar Indicators:**
+- 📊 **Context Budget** - Shows remaining token budget (healthy/warning/critical)
+- Click to see detailed token usage breakdown
+
+### 3. Memory Bank Structure
 
 ```
 AI-Memory/
@@ -117,7 +158,7 @@ AI-Memory/
 └── projectBrief.md       # Project goals/context
 ```
 
-### 3. Workflow Prompts
+### 4. Workflow Prompts
 
 Embedded (baked) versions of:
 - **Think.prompt.md** - Deep research and analysis
@@ -130,7 +171,7 @@ Embedded (baked) versions of:
 
 Optional workspace override: if your repository has `.github/prompts/*.prompt.md` files they will automatically be used (when `aiSkeleton.prompts.source` = `auto` or `workspace`).
 
-### 4. Memory & Deep Thinking Agent
+### 5. Memory & Deep Thinking Agent
 
 Pre-configured agent mode (`memory-deep-think.agent.md`) with:
 - Autonomous memory updates
@@ -138,7 +179,7 @@ Pre-configured agent mode (`memory-deep-think.agent.md`) with:
 - MCP tool integration
 - Tagged entry system for efficient scanning (`[TYPE:YYYY-MM-DD]` format)
 
-### 5. Visual Interface
+### 6. Visual Interface
 
 - **Memory Bank Tree View**: Visual browser for `AI-Memory/` files in Explorer
 - **AI Skeleton Prompts Tree View**: Browse and interact with embedded prompts
