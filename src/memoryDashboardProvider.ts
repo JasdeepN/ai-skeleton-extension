@@ -62,6 +62,7 @@ export class MemoryDashboardTreeProvider implements vscode.TreeDataProvider<Dash
 
       return [
         new DashboardTreeItem('Status', vscode.TreeItemCollapsibleState.Expanded, 'status', metrics),
+        new DashboardTreeItem('Context Switching', vscode.TreeItemCollapsibleState.Expanded, 'context-switching'),
         new DashboardTreeItem('Metrics', vscode.TreeItemCollapsibleState.Expanded, 'metrics', metrics),
         new DashboardTreeItem('Latest Entries', vscode.TreeItemCollapsibleState.Collapsed, 'latest', metrics),
         new DashboardTreeItem('Tasks', vscode.TreeItemCollapsibleState.Collapsed, 'tasks', metrics.tasks),
@@ -72,6 +73,10 @@ export class MemoryDashboardTreeProvider implements vscode.TreeDataProvider<Dash
     switch (element.kind) {
       case 'status':
         return this.buildStatusItems(element.meta as DashboardMetrics);
+      case 'context-switching':
+        return await this.buildContextSwitchingItems();
+      case 'context-switching-phase':
+        return await this.buildPhaseHistoryItems(element.meta as string);
       case 'metrics':
         return await this.buildMetricsItems(element.meta as DashboardMetrics);
       case 'latest':
@@ -171,15 +176,127 @@ export class MemoryDashboardTreeProvider implements vscode.TreeDataProvider<Dash
     return items;
   }
 
-  private buildCountsItems(metrics: DashboardMetrics): DashboardTreeItem[] {
+  private async buildContextSwitchingItems(): Promise<DashboardTreeItem[]> {
     const items: DashboardTreeItem[] = [];
-    for (const type of Object.keys(metrics.entryCounts) as MemoryEntry['file_type'][]) {
-      const count = metrics.entryCounts[type] ?? 0;
-      const label = `${FILE_TYPE_LABELS[type]}: ${count}`;
-      const item = new DashboardTreeItem(label, vscode.TreeItemCollapsibleState.None, 'count-item');
-      item.iconPath = new vscode.ThemeIcon('number');
-      items.push(item);
+
+    // Current Context
+    const current = await this.memoryService.getCurrentContext();
+    const currentItem = new DashboardTreeItem(
+      current ? `📋 Current Context: ${(current as any).tag || 'Active'}` : '📋 No Active Context',
+      vscode.TreeItemCollapsibleState.None,
+      'context-item'
+    );
+    currentItem.description = current ? (current as any).timestamp?.split('T')[0] : 'Start new task';
+    currentItem.command = current ? undefined : { command: 'aiSkeleton.context.newTask', title: 'New Task' };
+    items.push(currentItem);
+
+    // Phase History
+    const history = await this.memoryService.getPhaseHistory();
+
+    const researchItem = new DashboardTreeItem(
+      `🔍 Research (${history.research.done}✓ ${history.research.inProgress}⏳)`,
+      vscode.TreeItemCollapsibleState.Collapsed,
+      'context-switching-phase',
+      'research'
+    );
+    items.push(researchItem);
+
+    const planningItem = new DashboardTreeItem(
+      `📐 Planning (${history.planning.done}✓ ${history.planning.inProgress}⏳)`,
+      vscode.TreeItemCollapsibleState.Collapsed,
+      'context-switching-phase',
+      'planning'
+    );
+    items.push(planningItem);
+
+    const executionItem = new DashboardTreeItem(
+      `✔️ Execution (${history.execution.done}✓ ${history.execution.inProgress}⏳)`,
+      vscode.TreeItemCollapsibleState.Collapsed,
+      'context-switching-phase',
+      'execution'
+    );
+    items.push(executionItem);
+
+    // Actions
+    const clearItem = new DashboardTreeItem('⊝ Clear Context', vscode.TreeItemCollapsibleState.None, 'context-action');
+    clearItem.command = { command: 'aiSkeleton.context.clear', title: 'Clear Context' };
+    items.push(clearItem);
+
+    const newTaskItem = new DashboardTreeItem('➕ New Task', vscode.TreeItemCollapsibleState.None, 'context-action');
+    newTaskItem.command = { command: 'aiSkeleton.context.newTask', title: 'New Task' };
+    items.push(newTaskItem);
+
+    return items;
+  }
+
+  private async buildPhaseHistoryItems(phase: string): Promise<DashboardTreeItem[]> {
+    const phaseEntries = await this.memoryService.queryByPhase(phase as any);
+    const items: DashboardTreeItem[] = [];
+
+    // Done section
+    if (phaseEntries.done.length > 0) {
+      items.push(new DashboardTreeItem(
+        `✅ Done (${phaseEntries.done.length})`,
+        phaseEntries.done.length > 0 ? vscode.TreeItemCollapsibleState.Collapsed : vscode.TreeItemCollapsibleState.None,
+        'phase-done-header'
+      ));
+      
+      phaseEntries.done.forEach(entry => {
+        const item = new DashboardTreeItem(
+          entry.tag || 'Untitled',
+          vscode.TreeItemCollapsibleState.None,
+          'phase-entry'
+        );
+        item.description = entry.timestamp?.split('T')[0];
+        item.iconPath = new vscode.ThemeIcon('check');
+        items.push(item);
+      });
     }
+
+    // In Progress section
+    if (phaseEntries.inProgress.length > 0) {
+      items.push(new DashboardTreeItem(
+        `⏳ In Progress (${phaseEntries.inProgress.length})`,
+        vscode.TreeItemCollapsibleState.Collapsed,
+        'phase-progress-header'
+      ));
+      
+      phaseEntries.inProgress.forEach(entry => {
+        const item = new DashboardTreeItem(
+          entry.tag || 'Untitled',
+          vscode.TreeItemCollapsibleState.None,
+          'phase-entry'
+        );
+        item.description = entry.timestamp?.split('T')[0];
+        item.iconPath = new vscode.ThemeIcon('clock');
+        items.push(item);
+      });
+    }
+
+    // Draft section
+    if (phaseEntries.draft.length > 0) {
+      items.push(new DashboardTreeItem(
+        `📝 Draft (${phaseEntries.draft.length})`,
+        vscode.TreeItemCollapsibleState.Collapsed,
+        'phase-draft-header'
+      ));
+      
+      phaseEntries.draft.forEach(entry => {
+        const item = new DashboardTreeItem(
+          entry.tag || 'Untitled',
+          vscode.TreeItemCollapsibleState.None,
+          'phase-entry'
+        );
+        item.description = entry.timestamp?.split('T')[0];
+        item.iconPath = new vscode.ThemeIcon('file');
+        items.push(item);
+      });
+    }
+
+    if (items.length === 0) {
+      items.push(new DashboardTreeItem('No entries', vscode.TreeItemCollapsibleState.None, 'phase-empty'));
+    }
+
     return items;
   }
 
@@ -217,6 +334,18 @@ export class MemoryDashboardTreeProvider implements vscode.TreeDataProvider<Dash
       new DashboardTreeItem(`Doing (${tasks.doing.length})`, vscode.TreeItemCollapsibleState.Collapsed, 'task-bucket', { bucket: 'doing', tasks: tasks.doing }),
       new DashboardTreeItem(`Done (${tasks.done.length})`, vscode.TreeItemCollapsibleState.Collapsed, 'task-bucket', { bucket: 'done', tasks: tasks.done })
     ];
+  }
+
+  private buildCountsItems(metrics: DashboardMetrics): DashboardTreeItem[] {
+    const items: DashboardTreeItem[] = [];
+    for (const type of Object.keys(metrics.entryCounts) as MemoryEntry['file_type'][]) {
+      const count = metrics.entryCounts[type] ?? 0;
+      const label = `${FILE_TYPE_LABELS[type]}: ${count}`;
+      const item = new DashboardTreeItem(label, vscode.TreeItemCollapsibleState.None, 'count-item');
+      item.iconPath = new vscode.ThemeIcon('number');
+      items.push(item);
+    }
+    return items;
   }
 
   private buildTaskItems(meta: { bucket: string; tasks: string[] }): DashboardTreeItem[] {

@@ -15,6 +15,7 @@ export interface MemoryEntry {
   metadata?: string; // JSON: {progress?: string, targets?: string[], phase?: string}
   phase?: 'research' | 'planning' | 'execution' | 'checkpoint' | null;
   progress_status?: 'done' | 'in-progress' | 'draft' | 'deprecated' | null;
+  embedding?: Uint8Array | null; // Binary quantized 384-dim vector (48 bytes) for semantic search
 }
 
 export interface TokenMetric {
@@ -250,7 +251,8 @@ export class MemoryStore {
             content TEXT NOT NULL,
             metadata TEXT DEFAULT '{}',
             phase TEXT DEFAULT NULL,
-            progress_status TEXT DEFAULT NULL
+            progress_status TEXT DEFAULT NULL,
+            embedding BLOB DEFAULT NULL
           );
 
           CREATE INDEX IF NOT EXISTS idx_file_timestamp 
@@ -297,7 +299,8 @@ export class MemoryStore {
             content TEXT NOT NULL,
             metadata TEXT DEFAULT '{}',
             phase TEXT DEFAULT NULL,
-            progress_status TEXT DEFAULT NULL
+            progress_status TEXT DEFAULT NULL,
+            embedding BLOB DEFAULT NULL
           )`,
           `CREATE INDEX IF NOT EXISTS idx_file_timestamp 
             ON entries(file_type, timestamp DESC)`,
