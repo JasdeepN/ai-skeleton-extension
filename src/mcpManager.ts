@@ -65,11 +65,15 @@ export async function startMCPServers(context: vscode.ExtensionContext): Promise
       const existing = vscode.window.terminals.find(t => t.name === termName);
       if (existing) {
         // If terminal still active, skip starting again
-        existing.show(false);
         continue;
       }
 
-      const terminal = vscode.window.createTerminal({ name: termName, iconPath: new vscode.ThemeIcon('plug') });
+      // Create terminal in background without showing it
+      const terminal = vscode.window.createTerminal({ 
+        name: termName, 
+        iconPath: new vscode.ThemeIcon('plug'),
+        hideFromUser: true  // Keep terminal truly hidden/background
+      });
 
       // If the command uses uvx, ensure we run it with a clean Python environment to avoid
       // leaking user/site packages (e.g., ESP-IDF) that can break mcp-server-* dependencies.
@@ -85,7 +89,7 @@ export async function startMCPServers(context: vscode.ExtensionContext): Promise
         }
       }
       terminal.sendText(commandLine, true);
-      terminal.show(false);
+      // Don't show terminal - keep it in background
       context.subscriptions.push(terminal);
     } catch (err) {
       vscode.window.showErrorMessage(`Failed to start MCP server '${id}': ${err}`);
