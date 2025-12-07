@@ -138,9 +138,10 @@ const handler: vscode.ChatRequestHandler = async (
               token
             );
 
-            // Create result part (input can be string or any)
+            // Create result part with proper tool call ID reference
+            // The callId links the result back to the original tool call
             const resultPart = new vscode.LanguageModelToolResultPart(
-              toolCall.name,
+              toolCall.callId,
               [String(toolResult)]
             );
             toolResults.push(resultPart);
@@ -148,7 +149,7 @@ const handler: vscode.ChatRequestHandler = async (
             // Handle individual tool invocation errors gracefully
             const errorMessage = err instanceof Error ? err.message : String(err);
             const resultPart = new vscode.LanguageModelToolResultPart(
-              toolCall.name,
+              toolCall.callId,
               [`Error invoking ${toolCall.name}: ${errorMessage}`]
             );
             toolResults.push(resultPart);
