@@ -200,6 +200,7 @@ export class MemoryStore {
       
       try {
         const SQL = await initSqlJs({ wasmBinary });
+        console.log('[MemoryStore] sql.js initialized successfully, creating database');
         
         // Try to load existing DB file
         let fileBuffer: Buffer | undefined;
@@ -220,6 +221,9 @@ export class MemoryStore {
         
         console.log('[MemoryStore] Using sql.js (WebAssembly SQLite) backend - SUCCESS');
         return true;
+      } catch (sqlErr) {
+        console.error('[MemoryStore] Error during sql.js initialization or DB creation:', sqlErr);
+        throw sqlErr;
       } finally {
         // Restore navigator to original state
         if (hadNavigator) {
@@ -229,7 +233,12 @@ export class MemoryStore {
         }
       }
     } catch (err) {
-      console.warn('[MemoryStore] sql.js initialization failed:', err);
+      console.error('[MemoryStore] sql.js initialization failed with error:', err);
+      console.error('[MemoryStore] Error details:', {
+        name: (err as any)?.name,
+        message: (err as any)?.message,
+        stack: (err as any)?.stack?.split('\n').slice(0, 5).join('\n')
+      });
       
       try {
         // Fallback to better-sqlite3 (optional, native)

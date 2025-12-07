@@ -113,17 +113,24 @@ export class MemoryBankService {
             const dbPath = path.join(memoryPath.fsPath, 'memory.db');
             console.log('[MemoryService] Initializing database at:', dbPath);
             let initialized = false;
+            let initError: any = null;
             try {
               initialized = await this._store.init(dbPath);
             } catch (dbError) {
+              initError = dbError;
               console.error('[MemoryService] Database initialization threw error:', dbError);
+              console.error('[MemoryService] Full error:', {
+                message: (dbError as any)?.message,
+                stack: (dbError as any)?.stack
+              });
               // Will be handled by !initialized check below
             }
 
             if (!initialized) {
-              console.error('[MemoryService] Failed to initialize database at:', dbPath);
+              const errorMsg = initError ? `${(initError as any)?.message}` : 'Unknown error';
+              console.error('[MemoryService] Failed to initialize database at:', dbPath, 'Error:', errorMsg);
               vscode.window.showErrorMessage(
-                'Failed to create AI-Memory: Error: Failed to initialize database. Check VS Code output for details.'
+                `Failed to create AI-Memory: ${errorMsg}`
               );
               this._state = {
                 active: false,
