@@ -45,7 +45,28 @@ const handler: vscode.ChatRequestHandler = async (
 ) => {
   try {
     // Get the selected language model
+    // request.model is provided by the chat system, but we need to ensure it's available
     const model = request.model;
+    
+    if (!model) {
+      // Fallback: try to select Claude model explicitly
+      const models = await vscode.lm.selectChatModels({
+        vendor: 'copilot',
+        family: 'gpt-4o'
+      });
+      
+      if (!models || models.length === 0) {
+        stream.markdown(
+          '🤖 **No Language Model Available**\n\n' +
+          'The @aiSkeleton chat participant requires a language model to be available. ' +
+          'Please ensure:\n' +
+          '- GitHub Copilot is installed and enabled\n' +
+          '- You are signed in to GitHub\n' +
+          '- A chat model is available in your VS Code instance'
+        );
+        return;
+      }
+    }
 
     // Filter tools to include only ai-skeleton memory tools
     const allTools = vscode.lm.tools;
