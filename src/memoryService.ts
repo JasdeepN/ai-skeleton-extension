@@ -644,6 +644,7 @@ export class MemoryBankService {
       minRelevanceThreshold?: number;
       includeTypes?: StoreMemoryEntry['file_type'][];
       maxAgeDays?: number;
+      useSemanticSearch?: boolean; // PHASE 8.2: Enable semantic search blending
     }
   ): Promise<{
     entries: StoreMemoryEntry[];
@@ -654,6 +655,7 @@ export class MemoryBankService {
     const opts = {
       minRelevanceThreshold: 0.1,
       maxAgeDays: 90,
+      useSemanticSearch: false,
       ...options
     };
 
@@ -688,9 +690,39 @@ export class MemoryBankService {
       allEntries = allEntries.filter(e => e.timestamp >= cutoffISO);
     }
 
-    // Score all entries for relevance
+    // Score all entries for relevance (keyword-based)
     const scorer = RelevanceScorer;
-    const scoredEntries = scorer.scoreEntries(allEntries, query);
+    let scoredEntries = scorer.scoreEntries(allEntries, query);
+
+    // PHASE 8.2: Optionally blend in semantic search scores
+    if (opts.useSemanticSearch && allEntries.length > 0) {
+      try {
+        console.log('[selectContextForBudget] Blending semantic search scores');
+        const semanticResults = await this.semanticSearch(query, Math.min(20, allEntries.length));
+
+        // Map semantic scores by tag for quick lookup
+        const semanticScoreMap = new Map<string, number>();
+        for (const entry of semanticResults.entries) {
+          semanticScoreMap.set(entry.tag, entry.score);
+        }
+
+        // Blend: 60% keyword score (finalScore) + 40% semantic score (normalized 0-1)
+        scoredEntries = scoredEntries.map(scored => {
+          const semanticScore = semanticScoreMap.get(scored.entry.tag) ?? 50; // default 50% if missing
+          const semanticNormalized = semanticScore / 100;
+          const blended = 0.6 * scored.finalScore + 0.4 * semanticNormalized;
+          return {
+            ...scored,
+            finalScore: blended,
+            reason: `${scored.reason ?? 'keyword relevance'} (+ semantic ${semanticNormalized.toFixed(2)})`
+          };
+        });
+
+        console.log('[selectContextForBudget] Blended', scoredEntries.length, 'entries with semantic scores');
+      } catch (err) {
+        console.error('[selectContextForBudget] Semantic blending failed, using keyword-only:', err);
+      }
+    }
 
     // Filter by minimum relevance threshold
     const relevantEntries = scorer.filterByThreshold(scoredEntries, opts.minRelevanceThreshold);

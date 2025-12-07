@@ -8,7 +8,10 @@ import { getMemoryService } from './memoryService';
 import { getMemoryStore } from './memoryStore';
 
 // Tool parameter interfaces
-interface ShowMemoryParams {}
+interface ShowMemoryParams {
+  query?: string;
+  limit?: number;
+}
 
 interface LogDecisionParams {
   decision: string;
@@ -75,12 +78,24 @@ export class ShowMemoryTool implements vscode.LanguageModelTool<ShowMemoryParams
     _token: vscode.CancellationToken
   ): Promise<vscode.LanguageModelToolResult> {
     // Count input tokens (ignore any file parameter to guarantee DB-only reads)
-    const sanitizedInput = {};
+    const sanitizedInput = { query: options.input?.query ?? '', limit: options.input?.limit ?? undefined };
     const inputTokens = await options.tokenizationOptions?.countTokens(JSON.stringify(sanitizedInput)) ?? 0;
     
     const service = getMemoryService();
     // Force DB-only: ignore options.input.file entirely to prevent markdown access
-    const content = await service.showMemory();
+    let content = await service.showMemory();
+
+    // If query provided, append semantic search results (top-k)
+    if (options.input?.query) {
+      const limit = options.input?.limit ?? 5;
+      const semantic = await service.semanticSearch(options.input.query, limit);
+      if (semantic.entries.length > 0) {
+        const formatted = semantic.entries
+          .map(e => `- ${e.tag || e.file_type} (score: ${e.score ?? 'n/a'})\n${(e.content || '').slice(0, 200)}\n`)
+          .join('\n');
+        content += `\n\n[SEMANTIC MATCHES]\nQuery: ${options.input.query}\nTop ${semantic.entries.length} results:\n${formatted}`;
+      }
+    }
 
     // Count output tokens
     const outputTokens = await options.tokenizationOptions?.countTokens(content) ?? 0;

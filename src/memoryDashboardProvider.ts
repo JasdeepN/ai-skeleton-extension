@@ -64,6 +64,7 @@ export class MemoryDashboardTreeProvider implements vscode.TreeDataProvider<Dash
         new DashboardTreeItem('Status', vscode.TreeItemCollapsibleState.Expanded, 'status', metrics),
         new DashboardTreeItem('Context Switching', vscode.TreeItemCollapsibleState.Expanded, 'context-switching'),
         new DashboardTreeItem('Metrics', vscode.TreeItemCollapsibleState.Expanded, 'metrics', metrics),
+        new DashboardTreeItem('Semantic Search', vscode.TreeItemCollapsibleState.Expanded, 'semantic'),
         new DashboardTreeItem('Latest Entries', vscode.TreeItemCollapsibleState.Collapsed, 'latest', metrics),
         new DashboardTreeItem('Tasks', vscode.TreeItemCollapsibleState.Collapsed, 'tasks', metrics.tasks),
         new DashboardTreeItem('Actions', vscode.TreeItemCollapsibleState.Expanded, 'actions')
@@ -79,6 +80,8 @@ export class MemoryDashboardTreeProvider implements vscode.TreeDataProvider<Dash
         return await this.buildPhaseHistoryItems(element.meta as string);
       case 'metrics':
         return await this.buildMetricsItems(element.meta as DashboardMetrics);
+      case 'semantic':
+        return await this.buildSemanticItems();
       case 'latest':
         return this.buildLatestTypeParents(element.meta as DashboardMetrics);
       case 'latest-type':
@@ -359,16 +362,35 @@ export class MemoryDashboardTreeProvider implements vscode.TreeDataProvider<Dash
     });
   }
 
+  private async buildSemanticItems(): Promise<DashboardTreeItem[]> {
+    const items: DashboardTreeItem[] = [];
+
+    const status = new DashboardTreeItem('Semantic search enabled (local embeddings)', vscode.TreeItemCollapsibleState.None, 'semantic-status');
+    status.iconPath = new vscode.ThemeIcon('sparkle');
+    items.push(status);
+
+    const findSimilar = new DashboardTreeItem('Find similar entries…', vscode.TreeItemCollapsibleState.None, 'semantic-find');
+    findSimilar.iconPath = new vscode.ThemeIcon('search');
+    findSimilar.command = { command: 'aiSkeleton.memoryDashboard.findSimilar', title: 'Find Similar' };
+    items.push(findSimilar);
+
+    return items;
+  }
+
   private buildActions(): DashboardTreeItem[] {
     const addTask = new DashboardTreeItem('Add Task to AI-Memory', vscode.TreeItemCollapsibleState.None, 'action');
     addTask.command = { command: 'aiSkeleton.memoryDashboard.addTask', title: 'Add Task' };
     addTask.iconPath = new vscode.ThemeIcon('plus');
 
+    const findSimilar = new DashboardTreeItem('Find Similar (Semantic Search)', vscode.TreeItemCollapsibleState.None, 'action');
+    findSimilar.command = { command: 'aiSkeleton.memoryDashboard.findSimilar', title: 'Find Similar' };
+    findSimilar.iconPath = new vscode.ThemeIcon('search');
+
     const refresh = new DashboardTreeItem('Refresh Dashboard', vscode.TreeItemCollapsibleState.None, 'action');
     refresh.command = { command: 'aiSkeleton.memoryDashboard.refresh', title: 'Refresh' };
     refresh.iconPath = new vscode.ThemeIcon('refresh');
 
-    return [addTask, refresh];
+    return [addTask, findSimilar, refresh];
   }
 
   private formatBytes(bytes: number): string {
@@ -415,6 +437,52 @@ export function registerMemoryDashboardView(context: vscode.ExtensionContext): {
       if (ok) {
         vscode.window.showInformationMessage('Task added to AI-Memory');
         provider.refresh();
+      }
+    })
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand('aiSkeleton.memoryDashboard.findSimilar', async () => {
+      const query = await vscode.window.showInputBox({
+        prompt: 'Semantic search query',
+        placeHolder: 'Enter keywords or description',
+        ignoreFocusOut: true
+      });
+      if (!query || !query.trim()) {
+        return;
+      }
+
+      try {
+        const memoryService = getMemoryService();
+        const results = await memoryService.semanticSearch(query.trim(), 10);
+        if (!results.entries.length) {
+          vscode.window.showInformationMessage('No similar entries found.');
+          return;
+        }
+
+        const items = results.entries.map(e => ({
+          label: e.tag || e.file_type,
+          description: e.reason || 'semantic match',
+          detail: (e.content || '').slice(0, 120),
+          entry: e
+        }));
+
+        const picked = await vscode.window.showQuickPick(items, {
+          placeHolder: 'Select an entry to view',
+          matchOnDetail: true,
+          canPickMany: false
+        });
+
+        if (picked && picked.entry) {
+          const entry = picked.entry;
+          const content = `**${entry.tag || entry.file_type}**\n\n${entry.content}`;
+          vscode.window.showInformationMessage(`Semantic match score: ${entry.score ?? 'n/a'} | ${picked.description}`);
+          const doc = await vscode.workspace.openTextDocument({ language: 'markdown', content });
+          await vscode.window.showTextDocument(doc, { preview: true });
+        }
+      } catch (err) {
+        console.error('[MemoryDashboard] Semantic search failed:', err);
+        vscode.window.showErrorMessage('Semantic search failed. See console for details.');
       }
     })
   );

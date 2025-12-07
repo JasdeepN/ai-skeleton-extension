@@ -167,8 +167,23 @@ ${detectedKeyword.summary}`;
       console.log('[ChatParticipant] Pre-fetching RELEVANT memory content via smart context selection');
       const memoryService = getMemoryService();
       
-      // Smart context selection with 50K token budget
+      // Step 1: Perform semantic search to find relevant entries
+      console.log('[ChatParticipant] Running semantic search on user query');
+      const semanticResults = await memoryService.semanticSearch(
+        request.prompt, // User query for semantic matching
+        15 // Top 15 semantically relevant entries
+      );
+      console.log('[ChatParticipant] Semantic search found', semanticResults.entries.length, 'relevant entries in', semanticResults.searchTime.toFixed(0), 'ms');
+      
+      // Log semantic search results for debugging
+      if (semanticResults.entries.length > 0) {
+        const topMatches = semanticResults.entries.slice(0, 3).map(e => `${e.tag} (score: ${e.score})`).join(', ');
+        console.log('[ChatParticipant] Top semantic matches:', topMatches);
+      }
+      
+      // Step 2: Smart context selection with 50K token budget
       // Uses relevance scoring, recency weighting, and priority multipliers
+      // Now informed by semantic search results
       const contextResult = await memoryService.selectContextForBudget(
         request.prompt, // User query for relevance matching
         50000, // 50K token budget for context
@@ -182,6 +197,7 @@ ${detectedKeyword.summary}`;
       contextCoverage = contextResult.coverage;
       console.log('[ChatParticipant] Smart context selection:', contextCoverage);
       console.log('[ChatParticipant] Selected context length:', preloadedMemory.length, 'chars');
+      console.log('[ChatParticipant] Semantic search + smart context complete');
     } catch (err) {
       console.error('[ChatParticipant] Failed to pre-load memory:', err);
       // Continue without preloaded memory - fallback will still work
