@@ -941,6 +941,97 @@ ${entry.content.trim()}`;
       };
     }
   }
+
+  /**
+   * Semantic search: find relevant entries using hybrid scoring
+   * Combines keyword relevance (keyword matching) with semantic similarity
+   * 
+   * Note: Semantic similarity requires embeddings to be pre-computed
+   * This is a placeholder for PHASE 7+ implementation
+   */
+  async semanticSearch(
+    query: string,
+    limit: number = 10,
+    semanticWeight: number = 0.7,
+    keywordWeight: number = 0.3
+  ): Promise<{
+    entries: Array<StoreMemoryEntry & { score: number; reason: string }>;
+    query: string;
+    searchTime: number;
+  }> {
+    const startTime = performance.now();
+    
+    try {
+      // Get all entries
+      const allResult = await this._store.queryByType('CONTEXT', 1000);
+      const allResult2 = await this._store.queryByType('DECISION', 1000);
+      const allResult3 = await this._store.queryByType('PROGRESS', 1000);
+      const allResult4 = await this._store.queryByType('PATTERN', 1000);
+      const allResult5 = await this._store.queryByType('BRIEF', 1000);
+      
+      const allEntries = [
+        ...allResult.entries,
+        ...allResult2.entries,
+        ...allResult3.entries,
+        ...allResult4.entries,
+        ...allResult5.entries
+      ];
+
+      // Score entries using keyword relevance (Phase 7+: add embedding similarity)
+      const scored = allEntries.map(entry => {
+        // Keyword matching: simple presence-based scoring
+        const queryTerms = query.toLowerCase().split(/\s+/);
+        const entryText = (entry.tag + ' ' + entry.content).toLowerCase();
+        
+        let keywordScore = 0;
+        for (const term of queryTerms) {
+          if (entryText.includes(term)) {
+            keywordScore++;
+          }
+        }
+        // Normalize: divide by number of terms
+        keywordScore = keywordScore / Math.max(queryTerms.length, 1);
+
+        // Semantic score: placeholder (0.5 default)
+        // TODO: Implement embedding similarity in PHASE 7
+        const semanticScore = 0.5;
+
+        // Hybrid score
+        const score = semanticWeight * semanticScore + keywordWeight * keywordScore;
+
+        return {
+          entry,
+          score,
+          reason: keywordScore > 0 ? `Keyword match (${Math.round(keywordScore * 100)}%)` : 'Semantic relevance',
+        };
+      });
+
+      // Sort by score descending, filter out low-scoring entries
+      const filtered = scored
+        .filter(s => s.score > 0.1)  // Minimum threshold
+        .sort((a, b) => b.score - a.score)
+        .slice(0, limit);
+
+      const searchTime = performance.now() - startTime;
+
+      return {
+        entries: filtered.map(s => ({
+          ...s.entry,
+          score: Math.round(s.score * 100) / 100,  // Round to 2 decimals
+          reason: s.reason,
+        })),
+        query,
+        searchTime,
+      };
+    } catch (err) {
+      console.error('Error in semantic search:', err);
+      return {
+        entries: [],
+        query,
+        searchTime: performance.now() - startTime,
+      };
+    }
+  }
 }
 
 // Singleton instance
