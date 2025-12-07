@@ -190,7 +190,16 @@ export class MemoryDashboardTreeProvider implements vscode.TreeDataProvider<Dash
       'context-item'
     );
     currentItem.description = current ? (current as any).timestamp?.split('T')[0] : 'Start new task';
-    currentItem.command = current ? undefined : { command: 'aiSkeleton.context.newTask', title: 'New Task' };
+    if (current) {
+      // Click to open context in editor
+      currentItem.command = { 
+        command: 'aiSkeleton.context.open', 
+        title: 'Open Context',
+        arguments: [(current as any).content, (current as any).tag]
+      };
+    } else {
+      currentItem.command = { command: 'aiSkeleton.context.newTask', title: 'New Task' };
+    }
     items.push(currentItem);
 
     // Phase History

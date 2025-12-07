@@ -1021,7 +1021,7 @@ export async function activate(context: vscode.ExtensionContext) {
     const confirmed = await vscode.window.showWarningMessage(
       'Clear current context?',
       { modal: true },
-      'Yes', 'Cancel'
+      'Yes'
     );
     if (confirmed === 'Yes') {
       try {
@@ -1043,6 +1043,25 @@ export async function activate(context: vscode.ExtensionContext) {
       } catch (err) {
         vscode.window.showErrorMessage(`Failed to clear context: ${err}`);
       }
+    }
+  }));
+
+  // Open context in editor
+  context.subscriptions.push(vscode.commands.registerCommand('aiSkeleton.context.open', async (content: string, tag: string) => {
+    try {
+      // Create an untitled document with the context content
+      const doc = await vscode.workspace.openTextDocument({
+        language: 'markdown',
+        content: `# ${tag}\n\n${content}`
+      });
+      
+      // Open in editor as preview (read-only)
+      await vscode.window.showTextDocument(doc, {
+        preview: true,
+        preserveFocus: false
+      });
+    } catch (err) {
+      vscode.window.showErrorMessage(`Failed to open context: ${err}`);
     }
   }));
 
