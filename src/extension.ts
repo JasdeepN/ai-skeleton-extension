@@ -1025,9 +1025,21 @@ export async function activate(context: vscode.ExtensionContext) {
     );
     if (confirmed === 'Yes') {
       try {
-        await memoryService.deleteEntry('CONTEXT', 'Current');
+        const memoryStore = getMemoryStore();
+        // Query for current CONTEXT entry and mark as deprecated
+        const result = await memoryStore.queryByType('CONTEXT', 1);
+        if (result.entries && result.entries.length > 0) {
+          // Create deprecated entry to mark context as cleared
+          await memoryStore.appendEntry({
+            file_type: 'CONTEXT',
+            timestamp: new Date().toISOString(),
+            tag: `[CONTEXT:${new Date().toISOString().split('T')[0]}] Context Cleared`,
+            content: 'Context has been cleared. Ready for new task.',
+            progress_status: 'deprecated'
+          });
+        }
         vscode.window.showInformationMessage('Context cleared');
-        dashboardProvider.refresh();
+        memoryDashboardProvider.refresh();
       } catch (err) {
         vscode.window.showErrorMessage(`Failed to clear context: ${err}`);
       }
@@ -1047,10 +1059,11 @@ export async function activate(context: vscode.ExtensionContext) {
     }
 
     try {
+      const memoryStore = getMemoryStore();
       const today = new Date().toISOString().split('T')[0];
       const timestamp = new Date().toISOString();
       
-      await memoryService.appendEntry({
+      await memoryStore.appendEntry({
         file_type: 'CONTEXT',
         timestamp,
         tag: `[TASK:${today}] ${task.trim()}`,
@@ -1060,7 +1073,7 @@ export async function activate(context: vscode.ExtensionContext) {
       });
 
       vscode.window.showInformationMessage(`New task created: ${task.trim()}`);
-      dashboardProvider.refresh();
+      memoryDashboardProvider.refresh();
     } catch (err) {
       vscode.window.showErrorMessage(`Failed to create task: ${err}`);
     }
