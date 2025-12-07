@@ -19,6 +19,9 @@
     "*"
   ],
   "main": "./dist/src/extension.js",
+  "capabilities": {
+    "chatParticipant": true
+  },
   "contributes": {
     "chatParticipants": [
       {
