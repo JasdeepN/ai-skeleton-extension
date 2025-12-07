@@ -227,6 +227,17 @@ If tools don't appear in agent mode or the tool picker:
 2. Reload VS Code after installation
 3. Run `AI Skeleton: List Registered LM Tools` to verify 7 tools are registered
 
+### MCP server fails with `ModuleNotFoundError: pydantic_core`
+Some systems load extra Python site-packages (e.g., from SDK toolchains) that clash with `uvx`-installed MCP servers. Run MCP servers with a clean Python env:
+
+```
+scripts/uvx-clean.sh mcp-server-git --help
+scripts/uvx-clean.sh mcp-server-git -r /path/to/repo
+scripts/uvx-clean.sh mcp-server-fetch --help
+```
+
+The wrapper unsets `PYTHONPATH` and enables `PYTHONNOUSERSITE=1`, preventing conflicting site-packages from being injected.
+
 ### Can I use this without the extension?
 
 Yes! The prompts and agents work standalone:

@@ -6,8 +6,6 @@ tsconfig.json
 **/*.map
 **/*.ts
 !dist/**/*.js
-node_modules/**
-!node_modules/sql.js/**
 .eslintrc.json
 **/.DS_Store
 *.vsix
