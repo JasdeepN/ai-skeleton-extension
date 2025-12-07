@@ -190,27 +190,44 @@ export class MemoryStore {
       }
 
       // Initialize with wasmBinary directly - most reliable method
-      const SQL = await initSqlJs({ wasmBinary });
-      
-      // Try to load existing DB file
-      let fileBuffer: Buffer | undefined;
-      try {
-        fileBuffer = fs.readFileSync(dbPath);
-        console.log('[MemoryStore] Loaded existing database from:', dbPath);
-      } catch (err) {
-        console.log('[MemoryStore] Creating new database at:', dbPath);
+      // Polyfill navigator to avoid issues with newer Node.js versions
+      const globalObj = global as any;
+      const hadNavigator = typeof globalObj.navigator !== 'undefined';
+      const oldNavigator = globalObj.navigator;
+      if (!hadNavigator) {
+        globalObj.navigator = {};
       }
       
-      this.db = new SQL.Database(fileBuffer);
-      this.backend = 'sql.js';
-      this.initializeSchema();
-      this.isInitialized = true;
-      
-      // Persist to disk
-      this.persistSqlJs();
-      
-      console.log('[MemoryStore] Using sql.js (WebAssembly SQLite) backend - SUCCESS');
-      return true;
+      try {
+        const SQL = await initSqlJs({ wasmBinary });
+        
+        // Try to load existing DB file
+        let fileBuffer: Buffer | undefined;
+        try {
+          fileBuffer = fs.readFileSync(dbPath);
+          console.log('[MemoryStore] Loaded existing database from:', dbPath);
+        } catch (err) {
+          console.log('[MemoryStore] Creating new database at:', dbPath);
+        }
+        
+        this.db = new SQL.Database(fileBuffer);
+        this.backend = 'sql.js';
+        this.initializeSchema();
+        this.isInitialized = true;
+        
+        // Persist to disk
+        this.persistSqlJs();
+        
+        console.log('[MemoryStore] Using sql.js (WebAssembly SQLite) backend - SUCCESS');
+        return true;
+      } finally {
+        // Restore navigator to original state
+        if (hadNavigator) {
+          globalObj.navigator = oldNavigator;
+        } else {
+          delete globalObj.navigator;
+        }
+      }
     } catch (err) {
       console.warn('[MemoryStore] sql.js initialization failed:', err);
       
