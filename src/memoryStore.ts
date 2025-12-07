@@ -98,6 +98,9 @@ export class MemoryStore {
     // Allow re-initialization if path changes OR if file was deleted
     if (this.isInitialized && this.dbPath === dbPath && fileExists) {
       console.log('[MemoryStore] Already initialized with same path:', dbPath);
+      // CRITICAL: Always run migrations even if already initialized
+      // This ensures schema updates are applied to existing databases
+      this.runMigrations();
       return true;
     }
 
