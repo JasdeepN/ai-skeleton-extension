@@ -192,53 +192,63 @@ const handler: vscode.ChatRequestHandler = async (
  * Called during extension activation to make the participant available
  */
 export function createChatParticipant(context: vscode.ExtensionContext) {
-  const participant = vscode.chat.createChatParticipant('aiSkeleton', handler);
+  // Verify chat API is available
+  if (!vscode.chat || !vscode.chat.createChatParticipant) {
+    console.error('[ChatParticipant] vscode.chat API not available - this requires VS Code 1.90+');
+    return;
+  }
 
-  // Set participant display properties
-  participant.iconPath = new vscode.ThemeIcon('database');
-  
-  participant.followupProvider = {
-    provideFollowups: async (
-      result: vscode.ChatResult,
-      _context: vscode.ChatContext,
-      _token: vscode.CancellationToken
-    ): Promise<vscode.ChatFollowup[]> => {
-      // Provide contextual followup suggestions based on conversation
-      const followups: vscode.ChatFollowup[] = [];
+  try {
+    const participant = vscode.chat.createChatParticipant('aiSkeleton', handler);
 
-      // Always suggest memory access
-      followups.push({
-        prompt: '/memory recent decisions',
-        label: '📚 Show Recent Decisions',
-        command: 'aiSkeleton.chat.showMemory'
-      });
+    // Set participant display properties
+    participant.iconPath = new vscode.ThemeIcon('database');
+    
+    participant.followupProvider = {
+      provideFollowups: async (
+        result: vscode.ChatResult,
+        _context: vscode.ChatContext,
+        _token: vscode.CancellationToken
+      ): Promise<vscode.ChatFollowup[]> => {
+        // Provide contextual followup suggestions based on conversation
+        const followups: vscode.ChatFollowup[] = [];
 
-      // Suggest decision logging if not already in response
-      if (result.metadata === undefined) {
+        // Always suggest memory access
         followups.push({
-          prompt: '/decide',
-          label: '📝 Log a Decision',
-          command: 'aiSkeleton.chat.logDecision'
+          prompt: '/memory recent decisions',
+          label: '📚 Show Recent Decisions',
+          command: 'aiSkeleton.chat.showMemory'
         });
+
+        // Suggest decision logging if not already in response
+        if (result.metadata === undefined) {
+          followups.push({
+            prompt: '/decide',
+            label: '📝 Log a Decision',
+            command: 'aiSkeleton.chat.logDecision'
+          });
+        }
+
+        return followups;
       }
+    };
 
-      return followups;
-    }
-  };
+    // Optional: Subscribe to feedback for telemetry
+    // This could be used to track which tools are most helpful
+    participant.onDidReceiveFeedback((feedback: vscode.ChatResultFeedback) => {
+      if (feedback.kind === vscode.ChatResultFeedbackKind.Helpful) {
+        console.log('[ChatParticipant] User found response helpful');
+      } else if (feedback.kind === vscode.ChatResultFeedbackKind.Unhelpful) {
+        console.log('[ChatParticipant] User found response unhelpful');
+      }
+    });
 
-  // Optional: Subscribe to feedback for telemetry
-  // This could be used to track which tools are most helpful
-  participant.onDidReceiveFeedback((feedback: vscode.ChatResultFeedback) => {
-    if (feedback.kind === vscode.ChatResultFeedbackKind.Helpful) {
-      console.log('[ChatParticipant] User found response helpful');
-    } else if (feedback.kind === vscode.ChatResultFeedbackKind.Unhelpful) {
-      console.log('[ChatParticipant] User found response unhelpful');
-    }
-  });
+    // Log successful registration
+    console.log('[ChatParticipant] @aiSkeleton chat participant registered successfully');
 
-  // Log successful registration
-  console.log('[ChatParticipant] @aiSkeleton chat participant registered successfully');
-
-  // Add to context subscriptions for cleanup on deactivation
-  context.subscriptions.push(participant);
+    // Add to context subscriptions for cleanup on deactivation
+    context.subscriptions.push(participant);
+  } catch (err) {
+    console.error('[ChatParticipant] Failed to create chat participant:', err);
+  }
 }

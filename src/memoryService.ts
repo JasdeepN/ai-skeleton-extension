@@ -394,6 +394,51 @@ export class MemoryBankService {
   }
 
   /**
+   * Mark item as deprecated
+   */
+  async markDeprecated(file: string, item: string, reason: string): Promise<boolean> {
+    if (!this._state.active) {
+      await this.detectMemoryBank();
+    }
+    if (!this._state.active) {
+      vscode.window.showErrorMessage('AI-Memory not found. Create one first.');
+      return false;
+    }
+
+    const fileTypeMap: Record<string, StoreMemoryEntry['file_type']> = {
+      'activeContext.md': 'CONTEXT',
+      'decisionLog.md': 'DECISION',
+      'progress.md': 'PROGRESS',
+      'systemPatterns.md': 'PATTERN',
+      'projectBrief.md': 'BRIEF'
+    };
+
+    const fileType = fileTypeMap[file];
+    if (!fileType) {
+      vscode.window.showErrorMessage(`Invalid file: ${file}`);
+      return false;
+    }
+
+    const tag = `DEPRECATED:${this.getToday()}`;
+    const content = `Item: ${item}\nReason: ${reason}`;
+
+    try {
+      await this._store.appendEntry({
+        file_type: 'CONTEXT',
+        timestamp: new Date().toISOString(),
+        tag,
+        content
+      });
+      this.setActivity('write');
+      this._cache.delete(fileType);
+      return true;
+    } catch (err) {
+      vscode.window.showErrorMessage(`Failed to mark deprecated: ${err}`);
+      return false;
+    }
+  }
+
+  /**
    * Get memory summary (optimized with cache)
    */
   async showMemory(maxLines: number = 50): Promise<string> {

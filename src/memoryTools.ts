@@ -5,6 +5,7 @@
 
 import * as vscode from 'vscode';
 import { getMemoryService } from './memoryService';
+import { getMemoryStore } from './memoryStore';
 
 // Tool parameter interfaces
 interface ShowMemoryParams {
@@ -50,9 +51,26 @@ export class ShowMemoryTool implements vscode.LanguageModelTool<ShowMemoryParams
     options: vscode.LanguageModelToolInvocationOptions<ShowMemoryParams>,
     _token: vscode.CancellationToken
   ): Promise<vscode.LanguageModelToolResult> {
+    // Count input tokens
+    const inputTokens = await options.tokenizationOptions?.countTokens(JSON.stringify(options.input)) ?? 0;
+    
     const service = getMemoryService();
     // Note: file parameter is deprecated, we now use showMemory() which includes all data
     const content = await service.showMemory();
+
+    // Count output tokens
+    const outputTokens = await options.tokenizationOptions?.countTokens(content) ?? 0;
+    
+    // Log metrics asynchronously (non-blocking)
+    void getMemoryStore().logTokenMetric({
+      timestamp: new Date().toISOString(),
+      model: 'unknown',
+      input_tokens: inputTokens,
+      output_tokens: outputTokens,
+      total_tokens: inputTokens + outputTokens,
+      operation: 'showMemory',
+      context_status: 'healthy'
+    });
 
     return new vscode.LanguageModelToolResult([
       new vscode.LanguageModelTextPart(content)
@@ -78,6 +96,9 @@ export class LogDecisionTool implements vscode.LanguageModelTool<LogDecisionPara
     options: vscode.LanguageModelToolInvocationOptions<LogDecisionParams>,
     _token: vscode.CancellationToken
   ): Promise<vscode.LanguageModelToolResult> {
+    // Count input tokens
+    const inputTokens = await options.tokenizationOptions?.countTokens(JSON.stringify(options.input)) ?? 0;
+    
     const service = getMemoryService();
     const { decision, rationale } = options.input;
 
@@ -85,6 +106,20 @@ export class LogDecisionTool implements vscode.LanguageModelTool<LogDecisionPara
     const message = success
       ? `✓ Decision logged: "${decision}"`
       : `✗ Failed to log decision. AI-Memory may not be initialized.`;
+
+    // Count output tokens
+    const outputTokens = await options.tokenizationOptions?.countTokens(message) ?? 0;
+    
+    // Log metrics asynchronously (non-blocking)
+    void getMemoryStore().logTokenMetric({
+      timestamp: new Date().toISOString(),
+      model: 'unknown',
+      input_tokens: inputTokens,
+      output_tokens: outputTokens,
+      total_tokens: inputTokens + outputTokens,
+      operation: 'logDecision',
+      context_status: 'healthy'
+    });
 
     return new vscode.LanguageModelToolResult([
       new vscode.LanguageModelTextPart(message)
@@ -115,6 +150,9 @@ export class UpdateContextTool implements vscode.LanguageModelTool<UpdateContext
     options: vscode.LanguageModelToolInvocationOptions<UpdateContextParams>,
     _token: vscode.CancellationToken
   ): Promise<vscode.LanguageModelToolResult> {
+    // Count input tokens
+    const inputTokens = await options.tokenizationOptions?.countTokens(JSON.stringify(options.input)) ?? 0;
+    
     const service = getMemoryService();
     const { context } = options.input;
 
@@ -122,6 +160,20 @@ export class UpdateContextTool implements vscode.LanguageModelTool<UpdateContext
     const message = success
       ? `✓ Context updated`
       : `✗ Failed to update context. AI-Memory may not be initialized.`;
+
+    // Count output tokens
+    const outputTokens = await options.tokenizationOptions?.countTokens(message) ?? 0;
+    
+    // Log metrics asynchronously (non-blocking)
+    void getMemoryStore().logTokenMetric({
+      timestamp: new Date().toISOString(),
+      model: 'unknown',
+      input_tokens: inputTokens,
+      output_tokens: outputTokens,
+      total_tokens: inputTokens + outputTokens,
+      operation: 'updateContext',
+      context_status: 'healthy'
+    });
 
     return new vscode.LanguageModelToolResult([
       new vscode.LanguageModelTextPart(message)
@@ -146,6 +198,9 @@ export class UpdateProgressTool implements vscode.LanguageModelTool<UpdateProgre
     options: vscode.LanguageModelToolInvocationOptions<UpdateProgressParams>,
     _token: vscode.CancellationToken
   ): Promise<vscode.LanguageModelToolResult> {
+    // Count input tokens
+    const inputTokens = await options.tokenizationOptions?.countTokens(JSON.stringify(options.input)) ?? 0;
+    
     const service = getMemoryService();
     const { item, status } = options.input;
 
@@ -153,6 +208,20 @@ export class UpdateProgressTool implements vscode.LanguageModelTool<UpdateProgre
     const message = success
       ? `✓ Progress updated: ${item} → ${status}`
       : `✗ Failed to update progress. AI-Memory may not be initialized.`;
+
+    // Count output tokens
+    const outputTokens = await options.tokenizationOptions?.countTokens(message) ?? 0;
+    
+    // Log metrics asynchronously (non-blocking)
+    void getMemoryStore().logTokenMetric({
+      timestamp: new Date().toISOString(),
+      model: 'unknown',
+      input_tokens: inputTokens,
+      output_tokens: outputTokens,
+      total_tokens: inputTokens + outputTokens,
+      operation: 'updateProgress',
+      context_status: 'healthy'
+    });
 
     return new vscode.LanguageModelToolResult([
       new vscode.LanguageModelTextPart(message)
@@ -177,6 +246,9 @@ export class UpdatePatternsTool implements vscode.LanguageModelTool<UpdatePatter
     options: vscode.LanguageModelToolInvocationOptions<UpdatePatternsParams>,
     _token: vscode.CancellationToken
   ): Promise<vscode.LanguageModelToolResult> {
+    // Count input tokens
+    const inputTokens = await options.tokenizationOptions?.countTokens(JSON.stringify(options.input)) ?? 0;
+    
     const service = getMemoryService();
     const { pattern, description } = options.input;
 
@@ -184,6 +256,20 @@ export class UpdatePatternsTool implements vscode.LanguageModelTool<UpdatePatter
     const message = success
       ? `✓ Pattern recorded: ${pattern}`
       : `✗ Failed to record pattern. AI-Memory may not be initialized.`;
+
+    // Count output tokens
+    const outputTokens = await options.tokenizationOptions?.countTokens(message) ?? 0;
+    
+    // Log metrics asynchronously (non-blocking)
+    void getMemoryStore().logTokenMetric({
+      timestamp: new Date().toISOString(),
+      model: 'unknown',
+      input_tokens: inputTokens,
+      output_tokens: outputTokens,
+      total_tokens: inputTokens + outputTokens,
+      operation: 'updatePatterns',
+      context_status: 'healthy'
+    });
 
     return new vscode.LanguageModelToolResult([
       new vscode.LanguageModelTextPart(message)
@@ -208,15 +294,81 @@ export class UpdateProjectBriefTool implements vscode.LanguageModelTool<UpdateBr
     options: vscode.LanguageModelToolInvocationOptions<UpdateBriefParams>,
     _token: vscode.CancellationToken
   ): Promise<vscode.LanguageModelToolResult> {
+    // Count input tokens
+    const inputTokens = await options.tokenizationOptions?.countTokens(JSON.stringify(options.input)) ?? 0;
+    
     const service = getMemoryService();
     const success = await service.updateProjectBrief(options.input.content);
+    const message = success ? '✓ Project brief updated' : '✗ Failed to update project brief';
+    
+    // Count output tokens
+    const outputTokens = await options.tokenizationOptions?.countTokens(message) ?? 0;
+    
+    // Log metrics asynchronously (non-blocking)
+    void getMemoryStore().logTokenMetric({
+      timestamp: new Date().toISOString(),
+      model: 'unknown',
+      input_tokens: inputTokens,
+      output_tokens: outputTokens,
+      total_tokens: inputTokens + outputTokens,
+      operation: 'updateProjectBrief',
+      context_status: 'healthy'
+    });
+    
     return new vscode.LanguageModelToolResult([
-      new vscode.LanguageModelTextPart(success ? '✓ Project brief updated' : '✗ Failed to update project brief')
+      new vscode.LanguageModelTextPart(message)
     ]);
   }
 
   async prepareInvocation() {
     return { invocationMessage: 'Updating project brief' };
+  }
+}
+
+/**
+ * Tool: Mark item as deprecated
+ */
+export class MarkDeprecatedTool implements vscode.LanguageModelTool<MarkDeprecatedParams> {
+  async invoke(
+    options: vscode.LanguageModelToolInvocationOptions<MarkDeprecatedParams>,
+    _token: vscode.CancellationToken
+  ): Promise<vscode.LanguageModelToolResult> {
+    // Count input tokens
+    const inputTokens = await options.tokenizationOptions?.countTokens(JSON.stringify(options.input)) ?? 0;
+    
+    const service = getMemoryService();
+    const { file, item, reason } = options.input;
+    const success = await service.markDeprecated(file, item, reason);
+    const message = success 
+      ? `✓ Marked deprecated in ${file}: ${item}` 
+      : `✗ Failed to mark deprecated. AI-Memory may not be initialized.`;
+    
+    // Count output tokens
+    const outputTokens = await options.tokenizationOptions?.countTokens(message) ?? 0;
+    
+    // Log metrics asynchronously (non-blocking)
+    void getMemoryStore().logTokenMetric({
+      timestamp: new Date().toISOString(),
+      model: 'unknown',
+      input_tokens: inputTokens,
+      output_tokens: outputTokens,
+      total_tokens: inputTokens + outputTokens,
+      operation: 'markDeprecated',
+      context_status: 'healthy'
+    });
+    
+    return new vscode.LanguageModelToolResult([
+      new vscode.LanguageModelTextPart(message)
+    ]);
+  }
+
+  async prepareInvocation(
+    options: vscode.LanguageModelToolInvocationPrepareOptions<MarkDeprecatedParams>,
+    _token: vscode.CancellationToken
+  ) {
+    return {
+      invocationMessage: `Marking deprecated in ${options.input.file}: ${options.input.item}`,
+    };
   }
 }
 
@@ -247,9 +399,10 @@ export function registerMemoryTools(context: vscode.ExtensionContext): void {
       vscode.lm.registerTool('aiSkeleton_updateContext', new UpdateContextTool()),
       vscode.lm.registerTool('aiSkeleton_updateProgress', new UpdateProgressTool()),
       vscode.lm.registerTool('aiSkeleton_updatePatterns', new UpdatePatternsTool()),
-      vscode.lm.registerTool('aiSkeleton_updateProjectBrief', new UpdateProjectBriefTool())
+      vscode.lm.registerTool('aiSkeleton_updateProjectBrief', new UpdateProjectBriefTool()),
+      vscode.lm.registerTool('aiSkeleton_markDeprecated', new MarkDeprecatedTool())
     );
-    console.log('[AI Skeleton] Memory tools registered successfully (6 LM tools)');
+    console.log('[AI Skeleton] Memory tools registered successfully (7 LM tools)');
   } catch (err) {
     console.error('[AI Skeleton] Failed to register memory tools:', err);
     void vscode.window.showErrorMessage(`AI Skeleton: Failed to register memory tools: ${err}`);

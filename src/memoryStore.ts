@@ -21,6 +21,7 @@ export interface TokenMetric {
   input_tokens: number;
   output_tokens: number;
   total_tokens: number;
+  operation?: string; // e.g., "showMemory", "logDecision"
   context_status?: 'healthy' | 'warning' | 'critical';
   created_at?: string;
 }
@@ -255,6 +256,7 @@ export class MemoryStore {
             input_tokens INTEGER NOT NULL,
             output_tokens INTEGER NOT NULL,
             total_tokens INTEGER NOT NULL,
+            operation TEXT,
             context_status TEXT,
             created_at TEXT DEFAULT CURRENT_TIMESTAMP
           );
@@ -295,6 +297,7 @@ export class MemoryStore {
             input_tokens INTEGER NOT NULL,
             output_tokens INTEGER NOT NULL,
             total_tokens INTEGER NOT NULL,
+            operation TEXT,
             context_status TEXT,
             created_at TEXT DEFAULT CURRENT_TIMESTAMP
           )`,
@@ -322,6 +325,45 @@ export class MemoryStore {
       }
     } catch (err) {
       console.error('[MemoryStore] Schema initialization failed:', err);
+    }
+
+    // Run migrations for existing databases
+    this.runMigrations();
+  }
+
+  /**
+   * Run database migrations for schema updates
+   */
+  private runMigrations(): void {
+    if (!this.db || !this.isInitialized) return;
+
+    try {
+      // Migration 1: Add operation column to token_metrics if it doesn't exist
+      if (this.backend === 'better-sqlite3') {
+        // Check if operation column exists
+        const tableInfo = this.db.prepare('PRAGMA table_info(token_metrics)').all() as Array<{name: string}>;
+        const hasOperation = tableInfo.some(col => col.name === 'operation');
+        
+        if (!hasOperation) {
+          console.log('[MemoryStore] Running migration: Adding operation column to token_metrics');
+          this.db.prepare('ALTER TABLE token_metrics ADD COLUMN operation TEXT').run();
+        }
+      } else if (this.backend === 'sql.js') {
+        // Check if operation column exists
+        const tableInfo = this.db.exec('PRAGMA table_info(token_metrics)');
+        if (tableInfo.length > 0) {
+          const columns = tableInfo[0].values.map((row: any) => row[1] as string);
+          const hasOperation = columns.includes('operation');
+          
+          if (!hasOperation) {
+            console.log('[MemoryStore] Running migration: Adding operation column to token_metrics');
+            this.db.run('ALTER TABLE token_metrics ADD COLUMN operation TEXT');
+            this.persistSqlJs();
+          }
+        }
+      }
+    } catch (err) {
+      console.error('[MemoryStore] Migration failed:', err);
     }
   }
 
@@ -573,8 +615,8 @@ export class MemoryStore {
     try {
       if (this.backend === 'better-sqlite3') {
         const stmt = this.db.prepare(`
-          INSERT INTO token_metrics (timestamp, model, input_tokens, output_tokens, total_tokens, context_status)
-          VALUES (?, ?, ?, ?, ?, ?)
+          INSERT INTO token_metrics (timestamp, model, input_tokens, output_tokens, total_tokens, operation, context_status)
+          VALUES (?, ?, ?, ?, ?, ?, ?)
         `);
         const result = stmt.run(
           metric.timestamp,
@@ -582,14 +624,15 @@ export class MemoryStore {
           metric.input_tokens,
           metric.output_tokens,
           metric.total_tokens,
+          metric.operation || null,
           metric.context_status || null
         );
         return result.lastInsertRowid as number;
       } else if (this.backend === 'sql.js') {
         this.db.run(
-          `INSERT INTO token_metrics (timestamp, model, input_tokens, output_tokens, total_tokens, context_status)
-           VALUES (?, ?, ?, ?, ?, ?)`,
-          [metric.timestamp, metric.model, metric.input_tokens, metric.output_tokens, metric.total_tokens, metric.context_status || null]
+          `INSERT INTO token_metrics (timestamp, model, input_tokens, output_tokens, total_tokens, operation, context_status)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          [metric.timestamp, metric.model, metric.input_tokens, metric.output_tokens, metric.total_tokens, metric.operation || null, metric.context_status || null]
         );
         this.persistSqlJs();
         return Math.floor(Date.now() / 1000);

@@ -14,6 +14,7 @@ interface TokenMetric {
   input_tokens: number;
   output_tokens: number;
   total_tokens: number;
+  operation?: string; // Tool name that logged this metric
   context_status?: 'healthy' | 'warning' | 'critical';
   created_at?: string;
 }
@@ -228,6 +229,47 @@ class MetricsServiceImpl {
     } catch (err) {
       console.error('[MetricsService] Failed to get cache hit rate:', err);
       return 0;
+    }
+  }
+
+  /**
+   * Get token metrics grouped by tool/operation
+   */
+  async getToolMetrics(days: number = 7): Promise<Record<string, { count: number; totalTokens: number; averageTokens: number }>> {
+    const cacheKey = `toolMetrics-${days}`;
+    
+    // Check cache
+    const cached = this.cache.get(cacheKey);
+    if (cached && Date.now() - cached.timestamp < this.CACHE_TTL) {
+      return cached.value;
+    }
+
+    try {
+      const metrics = await this.queryTokenMetrics(days);
+      const toolStats: Record<string, { count: number; totalTokens: number; averageTokens: number }> = {};
+
+      for (const metric of metrics) {
+        const operation = metric.operation || 'unknown';
+        
+        if (!toolStats[operation]) {
+          toolStats[operation] = { count: 0, totalTokens: 0, averageTokens: 0 };
+        }
+        
+        toolStats[operation].count++;
+        toolStats[operation].totalTokens += metric.total_tokens || 0;
+      }
+
+      // Calculate averages
+      for (const operation in toolStats) {
+        const stats = toolStats[operation];
+        stats.averageTokens = Math.round(stats.totalTokens / stats.count);
+      }
+
+      this.cache.set(cacheKey, { value: toolStats, timestamp: Date.now() });
+      return toolStats;
+    } catch (err) {
+      console.error('[MetricsService] Failed to get tool metrics:', err);
+      return {};
     }
   }
 
