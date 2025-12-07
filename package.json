@@ -2,7 +2,7 @@
   "name": "ai-skeleton-extension",
   "displayName": "AI Skeleton Prompts & Memory",
   "description": "Complete AI agent toolkit: Native memory management (AI-Memory), workflow prompts, MCP integration, and agent definitions.",
-  "version": "0.2.38",
+  "version": "0.2.39",
   "publisher": "JasdeepN",
   "license": "SEE LICENSE IN LICENSE",
   "repository": {
@@ -180,12 +180,7 @@
         "modelDescription": "Read and display memory bank contents. Use this to retrieve project context, decisions, progress, and patterns. Call this at the start of sessions to understand project state.",
         "inputSchema": {
           "type": "object",
-          "properties": {
-            "file": {
-              "type": "string",
-              "description": "Optional: specific file to read (e.g., 'activeContext.md', 'decisionLog.md')"
-            }
-          }
+          "properties": {}
         },
         "tags": [
           "ai-skeleton",
@@ -351,13 +346,13 @@
             "file": {
               "type": "string",
               "enum": [
-                "activeContext.md",
-                "decisionLog.md",
-                "progress.md",
-                "systemPatterns.md",
-                "projectBrief.md"
+                "context",
+                "decision",
+                "progress",
+                "patterns",
+                "brief"
               ],
-              "description": "The memory file to update"
+              "description": "The memory type to update (context, decision, progress, patterns, brief)"
             },
             "item": {
               "type": "string",

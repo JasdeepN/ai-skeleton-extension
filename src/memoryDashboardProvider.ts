@@ -2,11 +2,11 @@
 // Shows database status, metrics, latest entries, and tasks in the Activity Bar
 
 import * as vscode from 'vscode';
-import { FILE_TYPE_TO_FILENAME } from './memoryStore';
+import { FILE_TYPE_TO_DISPLAY, MemoryEntry } from './memoryStore';
 import { DashboardMetrics, DashboardTasksSnapshot, getMemoryService } from './memoryService';
 import { getMetricsService } from './metricsService';
 
-const FILE_TYPE_LABELS: Record<keyof typeof FILE_TYPE_TO_FILENAME, string> = {
+const FILE_TYPE_LABELS: Record<MemoryEntry['file_type'], string> = {
   CONTEXT: 'Context',
   DECISION: 'Decisions',
   PROGRESS: 'Progress',
@@ -77,7 +77,7 @@ export class MemoryDashboardTreeProvider implements vscode.TreeDataProvider<Dash
       case 'latest':
         return this.buildLatestTypeParents(element.meta as DashboardMetrics);
       case 'latest-type':
-        return this.buildLatestEntries(element.meta as { type: keyof typeof FILE_TYPE_TO_FILENAME; metrics: DashboardMetrics });
+        return this.buildLatestEntries(element.meta as { type: MemoryEntry['file_type']; metrics: DashboardMetrics });
       case 'counts-parent':
         return this.buildCountsItems(element.meta as DashboardMetrics);
       case 'tasks':
@@ -173,7 +173,7 @@ export class MemoryDashboardTreeProvider implements vscode.TreeDataProvider<Dash
 
   private buildCountsItems(metrics: DashboardMetrics): DashboardTreeItem[] {
     const items: DashboardTreeItem[] = [];
-    for (const type of Object.keys(metrics.entryCounts) as (keyof typeof FILE_TYPE_TO_FILENAME)[]) {
+    for (const type of Object.keys(metrics.entryCounts) as MemoryEntry['file_type'][]) {
       const count = metrics.entryCounts[type] ?? 0;
       const label = `${FILE_TYPE_LABELS[type]}: ${count}`;
       const item = new DashboardTreeItem(label, vscode.TreeItemCollapsibleState.None, 'count-item');
@@ -185,7 +185,7 @@ export class MemoryDashboardTreeProvider implements vscode.TreeDataProvider<Dash
 
   private buildLatestTypeParents(metrics: DashboardMetrics): DashboardTreeItem[] {
     const items: DashboardTreeItem[] = [];
-    for (const type of Object.keys(metrics.latest) as (keyof typeof FILE_TYPE_TO_FILENAME)[]) {
+    for (const type of Object.keys(metrics.latest) as MemoryEntry['file_type'][]) {
       const label = `${FILE_TYPE_LABELS[type]} (${metrics.latest[type].length})`;
       const parent = new DashboardTreeItem(label, vscode.TreeItemCollapsibleState.Collapsed, 'latest-type', { type, metrics });
       parent.iconPath = new vscode.ThemeIcon('bookmark');
@@ -194,7 +194,7 @@ export class MemoryDashboardTreeProvider implements vscode.TreeDataProvider<Dash
     return items;
   }
 
-  private buildLatestEntries(meta: { type: keyof typeof FILE_TYPE_TO_FILENAME; metrics: DashboardMetrics }): DashboardTreeItem[] {
+  private buildLatestEntries(meta: { type: MemoryEntry['file_type']; metrics: DashboardMetrics }): DashboardTreeItem[] {
     const { type, metrics } = meta;
     const entries = metrics.latest[type];
 
@@ -202,7 +202,7 @@ export class MemoryDashboardTreeProvider implements vscode.TreeDataProvider<Dash
       return [new DashboardTreeItem('No entries yet', vscode.TreeItemCollapsibleState.None, 'latest-leaf')];
     }
 
-    return entries.map(entry => {
+    return entries.map((entry: Pick<MemoryEntry, 'tag' | 'content' | 'timestamp'>) => {
       const label = entry.tag || FILE_TYPE_LABELS[type];
       const item = new DashboardTreeItem(label, vscode.TreeItemCollapsibleState.None, 'latest-leaf');
       item.description = this.truncate(entry.content, 80);

@@ -5,7 +5,6 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
 import { getMemoryStore, MemoryStore, MemoryEntry as StoreMemoryEntry } from './memoryStore';
-import { migrateMarkdownToSQLite, isMigrationNeeded } from './memoryMigration';
 import { exportSQLiteToMarkdown, createBackupMarkdown } from './memoryExport';
 
 export interface MemoryBankState {
@@ -136,13 +135,6 @@ export class MemoryBankService {
             }
 
             console.log('[MemoryService] Database initialized successfully');
-
-            // Check if migration needed
-            if (await isMigrationNeeded(memoryPath, this._store)) {
-              console.log('[MemoryService] Running migration from markdown to SQLite');
-              const migrationResult = await migrateMarkdownToSQLite(memoryPath, this._store);
-              console.log('[MemoryService] Migration complete:', migrationResult);
-            }
 
             // SQLite-only mode: Memory bank is active if database is initialized
             const dbInitialized = this._store.getBackend() !== 'none';
@@ -405,17 +397,27 @@ export class MemoryBankService {
       return false;
     }
 
-    const fileTypeMap: Record<string, StoreMemoryEntry['file_type']> = {
-      'activeContext.md': 'CONTEXT',
-      'decisionLog.md': 'DECISION',
-      'progress.md': 'PROGRESS',
-      'systemPatterns.md': 'PATTERN',
-      'projectBrief.md': 'BRIEF'
+    // Accept various input formats (lowercase, camelCase, uppercase) - no .md files
+    const typeMap: Record<string, StoreMemoryEntry['file_type']> = {
+      'activeContext': 'CONTEXT',
+      'context': 'CONTEXT',
+      'CONTEXT': 'CONTEXT',
+      'decisionLog': 'DECISION',
+      'decision': 'DECISION',
+      'DECISION': 'DECISION',
+      'progress': 'PROGRESS',
+      'PROGRESS': 'PROGRESS',
+      'systemPatterns': 'PATTERN',
+      'patterns': 'PATTERN',
+      'PATTERN': 'PATTERN',
+      'projectBrief': 'BRIEF',
+      'brief': 'BRIEF',
+      'BRIEF': 'BRIEF'
     };
 
-    const fileType = fileTypeMap[file];
+    const fileType = typeMap[file];
     if (!fileType) {
-      vscode.window.showErrorMessage(`Invalid file: ${file}`);
+      vscode.window.showErrorMessage(`Invalid memory type: ${file}. Use: context, decision, progress, patterns, or brief.`);
       return false;
     }
 
@@ -497,10 +499,10 @@ export class MemoryBankService {
       }
 
       if (entries && entries.length > 0) {
-        const typeName = type === 'BRIEF' ? 'projectBrief.md' :
-          type === 'CONTEXT' ? 'activeContext.md' :
-            type === 'PATTERN' ? 'systemPatterns.md' :
-              type === 'DECISION' ? 'decisionLog.md' : 'progress.md';
+        const typeName = type === 'BRIEF' ? 'Project Brief' :
+          type === 'CONTEXT' ? 'Active Context' :
+            type === 'PATTERN' ? 'System Patterns' :
+              type === 'DECISION' ? 'Decision Log' : 'Progress';
 
         sections.push(`## ${typeName} (${entries.length} entries)\n`);
         const lines = entries.map((e: any) => `[${e.tag}] ${e.content}`).slice(0, maxLines);

@@ -8,9 +8,7 @@ import { getMemoryService } from './memoryService';
 import { getMemoryStore } from './memoryStore';
 
 // Tool parameter interfaces
-interface ShowMemoryParams {
-  file?: string; // Optional: specific file to read
-}
+interface ShowMemoryParams {}
 
 interface LogDecisionParams {
   decision: string;
@@ -36,7 +34,7 @@ interface UpdateBriefParams {
 }
 
 interface MarkDeprecatedParams {
-  file: string;
+  file: string; // Accepts: context, decision, progress, patterns, brief (no .md extension)
   item: string;
   reason: string;
 }
@@ -51,11 +49,12 @@ export class ShowMemoryTool implements vscode.LanguageModelTool<ShowMemoryParams
     options: vscode.LanguageModelToolInvocationOptions<ShowMemoryParams>,
     _token: vscode.CancellationToken
   ): Promise<vscode.LanguageModelToolResult> {
-    // Count input tokens
-    const inputTokens = await options.tokenizationOptions?.countTokens(JSON.stringify(options.input)) ?? 0;
+    // Count input tokens (ignore any file parameter to guarantee DB-only reads)
+    const sanitizedInput = {};
+    const inputTokens = await options.tokenizationOptions?.countTokens(JSON.stringify(sanitizedInput)) ?? 0;
     
     const service = getMemoryService();
-    // Note: file parameter is deprecated, we now use showMemory() which includes all data
+    // Force DB-only: ignore options.input.file entirely to prevent markdown access
     const content = await service.showMemory();
 
     // Count output tokens
@@ -81,9 +80,9 @@ export class ShowMemoryTool implements vscode.LanguageModelTool<ShowMemoryParams
     options: vscode.LanguageModelToolInvocationPrepareOptions<ShowMemoryParams>,
     _token: vscode.CancellationToken
   ) {
-    const file = options.input.file;
+    // Explicitly ignore file param to avoid any markdown access
     return {
-      invocationMessage: file ? `Reading memory file: ${file}` : 'Reading AI-Memory contents',
+      invocationMessage: 'Reading AI-Memory contents (DB only)',
     };
   }
 }

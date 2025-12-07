@@ -2,7 +2,7 @@
 // Enables backup and maintains human-readable format
 
 import * as vscode from 'vscode';
-import { MemoryStore, MemoryEntry, FILE_TYPE_TO_FILENAME } from './memoryStore';
+import { MemoryStore, MemoryEntry, FILE_TYPE_TO_DISPLAY } from './memoryStore';
 
 export interface ExportResult {
   success: boolean;
@@ -15,7 +15,15 @@ export interface ExportResult {
  * Get file name for memory entry type
  */
 function getFileNameForType(type: MemoryEntry['file_type']): string {
-  return FILE_TYPE_TO_FILENAME[type];
+  // Export to .md files for human-readable backup
+  const filenameMap: Record<MemoryEntry['file_type'], string> = {
+    CONTEXT: 'activeContext.md',
+    DECISION: 'decisionLog.md',
+    PROGRESS: 'progress.md',
+    PATTERN: 'systemPatterns.md',
+    BRIEF: 'projectBrief.md'
+  };
+  return filenameMap[type];
 }
 
 /**

@@ -3,35 +3,38 @@ import { getMemoryService } from './memoryService';
 
 /**
  * System prompt for the @aiSkeleton chat participant
- * Optimized to encourage memory tool usage for context-aware responses
+ * Optimized to FORCE memory tool usage for context-aware responses
  */
-const SYSTEM_PROMPT = `You are an AI assistant with access to persistent project memory stored in a database.
+const SYSTEM_PROMPT = `You are @aiSkeleton, a memory-aware AI assistant. You MUST use the aiSkeleton_showMemory tool before responding to ANY question about the project.
 
-Available Memory Tools:
-- 📚 Show Memory: Retrieve context, decisions, patterns, or progress from the AI-Memory database
-- 📝 Log Decision: Record architectural or technical decisions with rationale for future reference
-- 📍 Update Context: Track current focus areas, blockers, and important state changes
-- ✅ Update Progress: Log task completion (done), current work (doing), and next steps
-- 🏗️ Update Patterns: Document code patterns, conventions, and architectural insights discovered
-- 📖 Update Brief: Modify project goals, scope, features, or constraints when they change
-- 🗑️ Mark Deprecated: Mark outdated patterns, decisions, or entries as deprecated
+CRITICAL: You have access to a database with project memory. ALWAYS call aiSkeleton_showMemory FIRST to check for existing context before answering.
 
-Guidelines for Tool Usage:
-1. Before answering questions about the project: Check memory for existing context using Show Memory tool
-2. When making or suggesting important decisions: Log them via Log Decision tool with clear rationale
-3. When user shifts focus: Update Context tool to track the new focus area
-4. When work completes: Update Progress tool to record completion
-5. When discovering patterns: Update Patterns tool to document for team/future reference
-6. When project goals change: Update Brief tool to reflect new reality
-7. When information becomes stale: Mark Deprecated tool to remove outdated entries
+Available Memory Tools (USE THESE):
+- aiSkeleton_showMemory: ALWAYS call this first to retrieve project context, decisions, patterns, and progress
+- aiSkeleton_logDecision: Log important decisions with rationale
+- aiSkeleton_updateContext: Update working context when focus shifts
+- aiSkeleton_updateProgress: Track task completion (done/doing/next)
+- aiSkeleton_updatePatterns: Document patterns and conventions
+- aiSkeleton_updateProjectBrief: Update project goals and scope
+- aiSkeleton_markDeprecated: Mark outdated entries
+
+REQUIRED WORKFLOW:
+1. FIRST: Call aiSkeleton_showMemory to load database contents
+2. Read the memory contents returned
+3. Then provide your response based on actual project data
+
+DO NOT respond with "no memory found" without actually calling the tool. The database has 100+ entries.
+
+Guidelines:
+- Check memory BEFORE answering questions about the project
+- Log important decisions via aiSkeleton_logDecision
+- Update context when user shifts focus
+- Track completed work with aiSkeleton_updateProgress
 
 Key Principles:
 - Always verify against memory first—avoid contradicting past decisions
-- Help the user maintain clear project state by suggesting memory updates
-- Use tools proactively: don't just respond, help track and remember important information
-- Provide context-aware responses that reference past decisions and patterns
-
-Respond naturally while leveraging memory to provide consistent, informed guidance.`;
+- Use tools proactively
+- Provide context-aware responses that reference past decisions and patterns`;
 
 /**
  * Handler for the @aiSkeleton chat participant
@@ -69,7 +72,28 @@ const handler: vscode.ChatRequestHandler = async (
 
     // Filter tools to include only ai-skeleton memory tools
     const allTools = vscode.lm.tools;
-    const tools = allTools.filter(t => t.tags?.includes('ai-skeleton'));
+    
+    // Debug: Log ALL tool info including tags
+    console.log('[ChatParticipant] ========== TOOL DEBUG START ==========');
+    console.log('[ChatParticipant] Total tools registered:', allTools.length);
+    for (const tool of allTools) {
+      console.log('[ChatParticipant] Tool:', tool.name, 'Tags:', tool.tags?.join(', ') || 'NO TAGS');
+    }
+    console.log('[ChatParticipant] ========== TOOL DEBUG END ==========');
+    
+    // Try multiple filter strategies
+    const toolsByTag = allTools.filter(t => t.tags?.includes('ai-skeleton'));
+    const toolsByName = allTools.filter(t => t.name.startsWith('aiSkeleton_'));
+    
+    console.log('[ChatParticipant] Tools by tag (ai-skeleton):', toolsByTag.length);
+    console.log('[ChatParticipant] Tools by name prefix (aiSkeleton_):', toolsByName.length);
+    
+    // Use name-based filter as fallback if tags aren't working
+    const tools = toolsByTag.length > 0 ? toolsByTag : toolsByName;
+
+    console.log('[ChatParticipant] Tool filtering: total=', allTools.length, 'filtered=', tools.length);
+    console.log('[ChatParticipant] All available tools:', allTools.map(t => t.name).join(', '));
+    console.log('[ChatParticipant] Filtered tools (ai-skeleton):', tools.map(t => t.name).join(', '));
 
     if (tools.length === 0) {
       stream.markdown('⚠️ No memory tools available. Please ensure AI Skeleton extension is properly initialized.');
@@ -78,9 +102,12 @@ const handler: vscode.ChatRequestHandler = async (
 
     // Build messages array: system prompt + user query
     const messages: vscode.LanguageModelChatMessage[] = [
-      vscode.LanguageModelChatMessage.User(SYSTEM_PROMPT),
+      vscode.LanguageModelChatMessage.User(`[SYSTEM PROMPT]\n${SYSTEM_PROMPT}`),
       vscode.LanguageModelChatMessage.User(request.prompt)
     ];
+
+    // Ensure we force at least one memory fetch even if the model does not emit tool calls
+    let forcedMemoryInvocation = false;
 
     // Helper function to run tool calling loop
     const runToolCallingLoop = async (): Promise<void> => {
@@ -88,6 +115,9 @@ const handler: vscode.ChatRequestHandler = async (
       if (token.isCancellationRequested) {
         return;
       }
+
+      console.log('[ChatParticipant] Sending request to model with', tools.length, 'tools available');
+      console.log('[ChatParticipant] Available tools:', tools.map(t => t.name).join(', '));
 
       // Send request to LM with available tools
       const response = await model.sendRequest(messages, { tools }, token);
@@ -106,17 +136,22 @@ const handler: vscode.ChatRequestHandler = async (
 
         if (part instanceof vscode.LanguageModelTextPart) {
           // Stream text response directly to user
+          console.log('[ChatParticipant] Received text part:', part.value.substring(0, 100) + '...');
           stream.markdown(part.value);
         } else if (part instanceof vscode.LanguageModelToolCallPart) {
           // Collect tool calls for processing
+          console.log('[ChatParticipant] Received tool call:', part.name, 'with input:', JSON.stringify(part.input).substring(0, 100));
           hasToolCalls = true;
           toolCalls.push({ part, index: responseIndex });
           responseIndex++;
         }
       }
 
+      console.log('[ChatParticipant] Stream complete. Tool calls detected:', hasToolCalls, 'Count:', toolCalls.length);
+
       // Process collected tool calls if any
       if (hasToolCalls && toolCalls.length > 0) {
+        console.log('[ChatParticipant] Processing', toolCalls.length, 'tool calls');
         // Create assistant message with tool calls
         const assistantMessage = vscode.LanguageModelChatMessage.Assistant(
           toolCalls.map(tc => tc.part)
@@ -128,6 +163,7 @@ const handler: vscode.ChatRequestHandler = async (
 
         for (const { part: toolCall } of toolCalls) {
           try {
+            console.log('[ChatParticipant] Invoking tool:', toolCall.name, 'with callId:', toolCall.callId);
             // Invoke the tool with the provided input
             const toolResult = await vscode.lm.invokeTool(
               toolCall.name,
@@ -138,6 +174,7 @@ const handler: vscode.ChatRequestHandler = async (
               token
             );
 
+            console.log('[ChatParticipant] Tool result received for', toolCall.name, ':', String(toolResult).substring(0, 100));
             // Create result part with proper tool call ID reference
             // The callId links the result back to the original tool call
             const resultPart = new vscode.LanguageModelToolResultPart(
@@ -148,6 +185,7 @@ const handler: vscode.ChatRequestHandler = async (
           } catch (err) {
             // Handle individual tool invocation errors gracefully
             const errorMessage = err instanceof Error ? err.message : String(err);
+            console.error('[ChatParticipant] Tool invocation error for', toolCall.name, ':', errorMessage);
             const resultPart = new vscode.LanguageModelToolResultPart(
               toolCall.callId,
               [`Error invoking ${toolCall.name}: ${errorMessage}`]
@@ -161,7 +199,47 @@ const handler: vscode.ChatRequestHandler = async (
         messages.push(userMessage);
 
         // Recursively continue the conversation to process tool results
+        console.log('[ChatParticipant] Tool results collected. Recursing into tool calling loop for further processing');
         return await runToolCallingLoop();
+      } else {
+        console.log('[ChatParticipant] No tool calls detected in response. Stream processing complete.');
+
+        // Force a memory load if none occurred to avoid "no memory" answers
+        if (!forcedMemoryInvocation) {
+          forcedMemoryInvocation = true;
+          try {
+            console.log('[ChatParticipant] Forcing aiSkeleton_showMemory invocation because model did not request tools');
+            const forcedResult = await vscode.lm.invokeTool(
+              'aiSkeleton_showMemory',
+              {
+                input: {},
+                toolInvocationToken: request.toolInvocationToken
+              },
+              token
+            );
+
+            // Normalize tool result into plain text
+            let forcedText: string;
+            if (typeof forcedResult === 'string') {
+              forcedText = forcedResult;
+            } else if (Array.isArray((forcedResult as any).content)) {
+              const parts = (forcedResult as any).content as any[];
+              forcedText = parts.map(p => (p as any).value ?? String(p)).join('\n');
+            } else {
+              forcedText = String(forcedResult);
+            }
+
+            // Inject the memory contents into the conversation history
+            const forcedMessage = vscode.LanguageModelChatMessage.User(forcedText);
+            messages.push(forcedMessage);
+
+            // Re-run the loop so the model can use the injected memory
+            return await runToolCallingLoop();
+          } catch (err) {
+            console.error('[ChatParticipant] Forced aiSkeleton_showMemory invocation failed:', err);
+            stream.markdown('⚠️ Failed to load AI-Memory automatically. Please try again or run /memory.');
+          }
+        }
       }
     };
 

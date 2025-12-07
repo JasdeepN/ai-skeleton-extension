@@ -35,27 +35,31 @@ export interface QueryMetric {
   created_at?: string;
 }
 
-// Mapping from uppercase tags to filenames
-export const FILE_TYPE_TO_FILENAME: Record<MemoryEntry['file_type'], string> = {
-  CONTEXT: 'activeContext.md',
-  DECISION: 'decisionLog.md',
-  PROGRESS: 'progress.md',
-  PATTERN: 'systemPatterns.md',
-  BRIEF: 'projectBrief.md'
+// Mapping from uppercase tags to display names (DB-only, no file extensions)
+export const FILE_TYPE_TO_DISPLAY: Record<MemoryEntry['file_type'], string> = {
+  CONTEXT: 'Active Context',
+  DECISION: 'Decision Log',
+  PROGRESS: 'Progress',
+  PATTERN: 'System Patterns',
+  BRIEF: 'Project Brief'
 };
 
-// Reverse mapping from filenames to uppercase tags
-export const FILENAME_TO_FILE_TYPE: Record<string, MemoryEntry['file_type']> = {
-  'activeContext.md': 'CONTEXT',
+// Reverse mapping from various inputs to uppercase tags (for backward compat)
+export const INPUT_TO_FILE_TYPE: Record<string, MemoryEntry['file_type']> = {
   'activeContext': 'CONTEXT',
-  'decisionLog.md': 'DECISION',
+  'context': 'CONTEXT',
+  'CONTEXT': 'CONTEXT',
   'decisionLog': 'DECISION',
-  'progress.md': 'PROGRESS',
+  'decision': 'DECISION',
+  'DECISION': 'DECISION',
   'progress': 'PROGRESS',
-  'systemPatterns.md': 'PATTERN',
+  'PROGRESS': 'PROGRESS',
   'systemPatterns': 'PATTERN',
-  'projectBrief.md': 'BRIEF',
-  'projectBrief': 'BRIEF'
+  'patterns': 'PATTERN',
+  'PATTERN': 'PATTERN',
+  'projectBrief': 'BRIEF',
+  'brief': 'BRIEF',
+  'BRIEF': 'BRIEF'
 };
 
 export interface QueryResult {
