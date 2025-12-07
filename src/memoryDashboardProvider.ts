@@ -3,7 +3,7 @@
 
 import * as vscode from 'vscode';
 import { FILE_TYPE_TO_DISPLAY, MemoryEntry } from './memoryStore';
-import { DashboardMetrics, DashboardTasksSnapshot, getMemoryService } from './memoryService';
+import { DashboardMetrics, getMemoryService } from './memoryService';
 import { getMetricsService } from './metricsService';
 
 const FILE_TYPE_LABELS: Record<MemoryEntry['file_type'], string> = {
@@ -66,7 +66,6 @@ export class MemoryDashboardTreeProvider implements vscode.TreeDataProvider<Dash
         new DashboardTreeItem('Metrics', vscode.TreeItemCollapsibleState.Expanded, 'metrics', metrics),
         new DashboardTreeItem('Semantic Search', vscode.TreeItemCollapsibleState.Expanded, 'semantic'),
         new DashboardTreeItem('Latest Entries', vscode.TreeItemCollapsibleState.Collapsed, 'latest', metrics),
-        new DashboardTreeItem('Tasks', vscode.TreeItemCollapsibleState.Collapsed, 'tasks', metrics.tasks),
         new DashboardTreeItem('Actions', vscode.TreeItemCollapsibleState.Expanded, 'actions')
       ];
     }
@@ -88,10 +87,6 @@ export class MemoryDashboardTreeProvider implements vscode.TreeDataProvider<Dash
         return this.buildLatestEntries(element.meta as { type: MemoryEntry['file_type']; metrics: DashboardMetrics });
       case 'counts-parent':
         return this.buildCountsItems(element.meta as DashboardMetrics);
-      case 'tasks':
-        return this.buildTaskBuckets(element.meta as DashboardTasksSnapshot);
-      case 'task-bucket':
-        return this.buildTaskItems(element.meta as { bucket: string; tasks: string[] });
       case 'actions':
         return this.buildActions();
       default:
@@ -340,14 +335,6 @@ export class MemoryDashboardTreeProvider implements vscode.TreeDataProvider<Dash
     });
   }
 
-  private buildTaskBuckets(tasks: DashboardTasksSnapshot): DashboardTreeItem[] {
-    return [
-      new DashboardTreeItem(`Next (${tasks.next.length})`, vscode.TreeItemCollapsibleState.Collapsed, 'task-bucket', { bucket: 'next', tasks: tasks.next }),
-      new DashboardTreeItem(`Doing (${tasks.doing.length})`, vscode.TreeItemCollapsibleState.Collapsed, 'task-bucket', { bucket: 'doing', tasks: tasks.doing }),
-      new DashboardTreeItem(`Done (${tasks.done.length})`, vscode.TreeItemCollapsibleState.Collapsed, 'task-bucket', { bucket: 'done', tasks: tasks.done })
-    ];
-  }
-
   private buildCountsItems(metrics: DashboardMetrics): DashboardTreeItem[] {
     const items: DashboardTreeItem[] = [];
     for (const type of Object.keys(metrics.entryCounts) as MemoryEntry['file_type'][]) {
@@ -358,17 +345,6 @@ export class MemoryDashboardTreeProvider implements vscode.TreeDataProvider<Dash
       items.push(item);
     }
     return items;
-  }
-
-  private buildTaskItems(meta: { bucket: string; tasks: string[] }): DashboardTreeItem[] {
-    if (!meta.tasks.length) {
-      return [new DashboardTreeItem('No items', vscode.TreeItemCollapsibleState.None, 'task-leaf')];
-    }
-    return meta.tasks.map(task => {
-      const item = new DashboardTreeItem(task, vscode.TreeItemCollapsibleState.None, 'task-leaf');
-      item.iconPath = new vscode.ThemeIcon(meta.bucket === 'done' ? 'check' : 'circle-small');
-      return item;
-    });
   }
 
   private async buildSemanticItems(): Promise<DashboardTreeItem[]> {
