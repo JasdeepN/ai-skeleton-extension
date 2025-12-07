@@ -13,24 +13,49 @@ interface ShowMemoryParams {}
 interface LogDecisionParams {
   decision: string;
   rationale: string;
+  metadata?: {
+    progress?: 'done' | 'in-progress' | 'draft' | 'deprecated';
+    targets?: ('ui' | 'db' | 'refactor' | 'tests' | 'docs' | 'perf' | 'integration' | 'infra')[];
+    phase?: 'research' | 'planning' | 'execution' | 'checkpoint';
+  };
 }
 
 interface UpdateContextParams {
   context: string;
+  metadata?: {
+    progress?: 'done' | 'in-progress' | 'draft' | 'deprecated';
+    targets?: ('ui' | 'db' | 'refactor' | 'tests' | 'docs' | 'perf' | 'integration' | 'infra')[];
+    phase?: 'research' | 'planning' | 'execution' | 'checkpoint';
+  };
 }
 
 interface UpdateProgressParams {
   item: string;
   status: 'done' | 'doing' | 'next';
+  metadata?: {
+    progress?: 'done' | 'in-progress' | 'draft' | 'deprecated';
+    targets?: ('ui' | 'db' | 'refactor' | 'tests' | 'docs' | 'perf' | 'integration' | 'infra')[];
+    phase?: 'research' | 'planning' | 'execution' | 'checkpoint';
+  };
 }
 
 interface UpdatePatternsParams {
   pattern: string;
   description: string;
+  metadata?: {
+    progress?: 'done' | 'in-progress' | 'draft' | 'deprecated';
+    targets?: ('ui' | 'db' | 'refactor' | 'tests' | 'docs' | 'perf' | 'integration' | 'infra')[];
+    phase?: 'research' | 'planning' | 'execution' | 'checkpoint';
+  };
 }
 
 interface UpdateBriefParams {
   content: string;
+  metadata?: {
+    progress?: 'done' | 'in-progress' | 'draft' | 'deprecated';
+    targets?: ('ui' | 'db' | 'refactor' | 'tests' | 'docs' | 'perf' | 'integration' | 'infra')[];
+    phase?: 'research' | 'planning' | 'execution' | 'checkpoint';
+  };
 }
 
 interface MarkDeprecatedParams {

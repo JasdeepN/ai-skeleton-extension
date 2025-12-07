@@ -227,7 +227,11 @@ export class MemoryBankService {
   /**
    * Append entry to SQLite database
    */
-  async logDecision(decision: string, rationale: string): Promise<boolean> {
+  async logDecision(
+    decision: string,
+    rationale: string,
+    metadata?: { progress?: string; targets?: string[]; phase?: string }
+  ): Promise<boolean> {
     if (!this._state.active) {
       await this.detectMemoryBank();
     }
@@ -238,13 +242,16 @@ export class MemoryBankService {
 
     const tag = `DECISION:${this.getToday()}`;
     const entry = `| ${this.getToday()} | ${decision} | ${rationale} |`;
+    const metadataJson = metadata ? JSON.stringify(metadata) : '{}';
 
     try {
       await this._store.appendEntry({
         file_type: 'DECISION',
         timestamp: new Date().toISOString(),
         tag,
-        content: entry
+        content: entry,
+        metadata: metadataJson,
+        progress_status: (metadata?.progress as any) || 'in-progress'
       });
       this.setActivity('write');
       this._cache.delete('DECISION');  // Invalidate cache
@@ -725,6 +732,108 @@ export class MemoryBankService {
   }
 
   /**
+   * Query entries by phase (research, planning, execution, checkpoint)
+   * Returns entries grouped by progress_status
+   */
+  async queryByPhase(phase: 'research' | 'planning' | 'execution' | 'checkpoint'): Promise<{
+    done: StoreMemoryEntry[];
+    inProgress: StoreMemoryEntry[];
+    draft: StoreMemoryEntry[];
+  }> {
+    try {
+      const result = await this._store.queryByType('CONTEXT', 500); // Query all with higher limit
+      const entries = result.entries.filter((e: any) => e.phase === phase);
+      
+      return {
+        done: entries.filter((e: any) => e.progress_status === 'done'),
+        inProgress: entries.filter((e: any) => e.progress_status === 'in-progress'),
+        draft: entries.filter((e: any) => !e.progress_status || (e.progress_status !== 'done' && e.progress_status !== 'in-progress'))
+      };
+    } catch (e) {
+      console.error('Error querying by phase:', e);
+      return { done: [], inProgress: [], draft: [] };
+    }
+  }
+
+  /**
+   * Query entries by progress status (done, in-progress, draft, deprecated)
+   * Returns all entries with matching status
+   */
+  async queryByProgressStatus(status: 'done' | 'in-progress' | 'draft' | 'deprecated'): Promise<StoreMemoryEntry[]> {
+    try {
+      const result = await this._store.queryByType('CONTEXT', 500);
+      const all = result.entries as StoreMemoryEntry[];
+      
+      if (status === 'deprecated') {
+        return all.filter((e: any) => e.progress_status === 'deprecated');
+      } else if (status === 'draft') {
+        return all.filter((e: any) => !e.progress_status || (e.progress_status !== 'done' && e.progress_status !== 'in-progress' && e.progress_status !== 'deprecated'));
+      }
+      
+      return all.filter((e: any) => e.progress_status === status);
+    } catch (e) {
+      console.error('Error querying by progress status:', e);
+      return [];
+    }
+  }
+
+  /**
+   * Get phase history for context switching section
+   * Returns entries organized by phase with counts
+   */
+  async getPhaseHistory(): Promise<{
+    research: { done: number; inProgress: number };
+    planning: { done: number; inProgress: number };
+    execution: { done: number; inProgress: number };
+  }> {
+    try {
+      const research = await this.queryByPhase('research');
+      const planning = await this.queryByPhase('planning');
+      const execution = await this.queryByPhase('execution');
+
+      return {
+        research: {
+          done: research.done.length,
+          inProgress: research.inProgress.length
+        },
+        planning: {
+          done: planning.done.length,
+          inProgress: planning.inProgress.length
+        },
+        execution: {
+          done: execution.done.length,
+          inProgress: execution.inProgress.length
+        }
+      };
+    } catch (e) {
+      console.error('Error getting phase history:', e);
+      return {
+        research: { done: 0, inProgress: 0 },
+        planning: { done: 0, inProgress: 0 },
+        execution: { done: 0, inProgress: 0 }
+      };
+    }
+  }
+
+  /**
+   * Get current context entry (activeContext)
+   * Returns most recent CONTEXT entry with file_type === 'CONTEXT'
+   */
+  async getCurrentContext(): Promise<StoreMemoryEntry | null> {
+    try {
+      const result = await this._store.queryByType('CONTEXT', 100);
+      const contexts = result.entries as StoreMemoryEntry[];
+      if (contexts.length === 0) return null;
+      
+      // Sort by timestamp descending, return first (most recent)
+      return contexts.sort((a: any, b: any) => (b.timestamp || '').localeCompare(a.timestamp || ''))[0];
+    } catch (e) {
+      console.error('Error getting current context:', e);
+      return null;
+    }
+  }
+
+  /**
    * Format a single memory entry for LM context (Markdown + YAML)
    * Optimized for token efficiency
    */
@@ -735,6 +844,102 @@ export class MemoryBankService {
     // Markdown format with YAML-style metadata
     return `[${entry.file_type}:${date}] ${tag}
 ${entry.content.trim()}`;
+  }
+
+  /**
+   * Query entries by target domain (ui/db/refactor/tests/docs/perf/integration/infra)
+   */
+  async queryByTargetDomain(domain: string): Promise<StoreMemoryEntry[]> {
+    try {
+      const allEntries = await this._store.queryByType('CONTEXT', 1000);
+      const entries = allEntries.entries || [];
+      
+      // Filter by domain in metadata
+      return entries.filter(entry => {
+        if (!entry.metadata) return false;
+        try {
+          const meta = JSON.parse(entry.metadata);
+          return meta.targets && Array.isArray(meta.targets) && meta.targets.includes(domain);
+        } catch {
+          return false;
+        }
+      });
+    } catch (e) {
+      console.error('Error querying by target domain:', e);
+      return [];
+    }
+  }
+
+  /**
+   * Get tag summary - count entries by progress status
+   */
+  async getTagSummary(): Promise<{
+    byProgress: Record<string, number>;
+    byPhase: Record<string, number>;
+    byDomain: Record<string, number>;
+  }> {
+    try {
+      const all = await this._store.queryByType('CONTEXT', 10000);
+      const entries = all.entries || [];
+      
+      const byProgress: Record<string, number> = {
+        'done': 0,
+        'in-progress': 0,
+        'draft': 0,
+        'deprecated': 0
+      };
+
+      const byPhase: Record<string, number> = {
+        'research': 0,
+        'planning': 0,
+        'execution': 0,
+        'checkpoint': 0
+      };
+
+      const byDomain: Record<string, number> = {
+        'ui': 0,
+        'db': 0,
+        'refactor': 0,
+        'tests': 0,
+        'docs': 0,
+        'perf': 0,
+        'integration': 0,
+        'infra': 0
+      };
+
+      for (const entry of entries) {
+        if (entry.progress_status && byProgress[entry.progress_status] !== undefined) {
+          byProgress[entry.progress_status]++;
+        }
+        if (entry.phase && byPhase[entry.phase] !== undefined) {
+          byPhase[entry.phase]++;
+        }
+        
+        if (entry.metadata) {
+          try {
+            const meta = JSON.parse(entry.metadata);
+            if (meta.targets && Array.isArray(meta.targets)) {
+              for (const domain of meta.targets) {
+                if (byDomain[domain] !== undefined) {
+                  byDomain[domain]++;
+                }
+              }
+            }
+          } catch {
+            // Ignore metadata parse errors
+          }
+        }
+      }
+
+      return { byProgress, byPhase, byDomain };
+    } catch (e) {
+      console.error('Error getting tag summary:', e);
+      return {
+        byProgress: {},
+        byPhase: {},
+        byDomain: {}
+      };
+    }
   }
 }
 
