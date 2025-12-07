@@ -457,8 +457,35 @@ export class MemoryBankService {
       `[MEMORY BANK: ACTIVE]`,
       `Path: ${this._state.path.fsPath}`,
       `Backend: ${this._state.backend}`,
+      `Database: memory.db (SQLite via ${this._state.backend === 'better-sqlite3' ? 'native' : 'WASM'})`,
       ''
     ];
+
+    // Get entry counts to show database statistics
+    const counts = await this._store.getEntryCounts();
+    const totalEntries = Object.values(counts).reduce((a, b) => a + b, 0);
+    
+    if (totalEntries === 0) {
+      sections.push('📝 **Memory Bank is Empty**');
+      sections.push('');
+      sections.push('Your memory database is initialized but contains no entries yet.');
+      sections.push('Start using the memory tools to populate it:');
+      sections.push('- `aiSkeleton_logDecision` - Log architectural decisions');
+      sections.push('- `aiSkeleton_updateContext` - Update working context');
+      sections.push('- `aiSkeleton_updateProgress` - Track task progress');
+      sections.push('- `aiSkeleton_updatePatterns` - Document patterns');
+      sections.push('- `aiSkeleton_updateProjectBrief` - Update project info');
+      sections.push('');
+      return sections.join('\n');
+    }
+
+    sections.push(`📊 **Database Statistics**: ${totalEntries} total entries`);
+    sections.push(`  • Context: ${counts.CONTEXT}`);
+    sections.push(`  • Decisions: ${counts.DECISION}`);
+    sections.push(`  • Progress: ${counts.PROGRESS}`);
+    sections.push(`  • Patterns: ${counts.PATTERN}`);
+    sections.push(`  • Brief: ${counts.BRIEF}`);
+    sections.push('');
 
     for (const type of types) {
       // Check cache first
@@ -475,7 +502,7 @@ export class MemoryBankService {
             type === 'PATTERN' ? 'systemPatterns.md' :
               type === 'DECISION' ? 'decisionLog.md' : 'progress.md';
 
-        sections.push(`## ${typeName}\n`);
+        sections.push(`## ${typeName} (${entries.length} entries)\n`);
         const lines = entries.map((e: any) => `[${e.tag}] ${e.content}`).slice(0, maxLines);
         sections.push(lines.join('\n\n'));
         sections.push('');
