@@ -1,5 +1,7 @@
 import * as vscode from 'vscode';
 import { getMemoryService } from './memoryService';
+import { detectKeyword } from './keywordDetector';
+import { buildUnifiedToolRegistry, formatAvailabilitySummary } from './toolRegistry';
 
 /**
  * System prompt for the @aiSkeleton chat participant
@@ -36,6 +38,36 @@ Key Principles:
 - Use tools proactively
 - Provide context-aware responses that reference past decisions and patterns`;
 
+const CONTEXT_WINDOW = 200_000;
+const OUTPUT_BUFFER = 20_000; // reserve for model output and safety
+const AVAILABILITY_TOKEN_CEILING = 800; // cap for availability header before falling back to counts-only
+
+async function estimateTokens(model: any, text: string): Promise<number> {
+  if (!text) return 0;
+  try {
+    const maybeCountTokens = model?.countTokens;
+    if (typeof maybeCountTokens === 'function') {
+      const result = await maybeCountTokens([text]);
+      if (typeof result === 'number') {
+        return result;
+      }
+      if (result && typeof result.tokenCount === 'number') {
+        return result.tokenCount;
+      }
+    }
+  } catch (err) {
+    console.warn('[ChatParticipant] countTokens failed, falling back to length estimation:', err);
+  }
+  // Fallback: rough heuristic (4 chars ≈ 1 token)
+  return Math.ceil(text.length / 4);
+}
+
+function approximateTokensFromStrings(parts: string[]): number {
+  if (!parts.length) return 0;
+  const combined = parts.join('\n\n');
+  return Math.ceil(combined.length / 4);
+}
+
 /**
  * Handler for the @aiSkeleton chat participant
  * Implements tool calling loop: sendRequest → detect ToolCallPart → invokeTool → recurse
@@ -70,44 +102,133 @@ const handler: vscode.ChatRequestHandler = async (
     const model = models[0];
     console.log('[ChatParticipant] Using model:', model.id, model.vendor, model.family);
 
-    // Filter tools to include only ai-skeleton memory tools
-    const allTools = vscode.lm.tools;
-    
-    // Debug: Log ALL tool info including tags
-    console.log('[ChatParticipant] ========== TOOL DEBUG START ==========');
-    console.log('[ChatParticipant] Total tools registered:', allTools.length);
-    for (const tool of allTools) {
-      console.log('[ChatParticipant] Tool:', tool.name, 'Tags:', tool.tags?.join(', ') || 'NO TAGS');
-    }
-    console.log('[ChatParticipant] ========== TOOL DEBUG END ==========');
-    
-    // Try multiple filter strategies
-    const toolsByTag = allTools.filter(t => t.tags?.includes('ai-skeleton'));
-    const toolsByName = allTools.filter(t => t.name.startsWith('aiSkeleton_'));
-    
-    console.log('[ChatParticipant] Tools by tag (ai-skeleton):', toolsByTag.length);
-    console.log('[ChatParticipant] Tools by name prefix (aiSkeleton_):', toolsByName.length);
-    
-    // Use name-based filter as fallback if tags aren't working
-    const tools = toolsByTag.length > 0 ? toolsByTag : toolsByName;
+    const cfg = vscode.workspace.getConfiguration('aiSkeleton');
+    const priority = cfg.get<'mcp' | 'extension' | 'mixed'>('mcp.priority', 'mcp');
+    const restrictions = cfg.get<string[]>('restrictions', []) ?? [];
 
-    console.log('[ChatParticipant] Tool filtering: total=', allTools.length, 'filtered=', tools.length);
-    console.log('[ChatParticipant] All available tools:', allTools.map(t => t.name).join(', '));
-    console.log('[ChatParticipant] Filtered tools (ai-skeleton):', tools.map(t => t.name).join(', '));
+    const registry = buildUnifiedToolRegistry({ priority, restrictions });
+    const tools = registry.allowed.map(entry => entry.tool);
+    const toolSourceMap = new Map<string, string>(registry.allowed.map(entry => [entry.name, entry.source]));
+
+    console.log('[ChatParticipant] Tool registry summary:', {
+      priority,
+      allowed: registry.summary.allowedCount,
+      blocked: registry.summary.blockedCount,
+      bySource: registry.summary.bySource,
+      blockedNames: registry.summary.blockedNames
+    });
 
     if (tools.length === 0) {
-      stream.markdown('⚠️ No memory tools available. Please ensure AI Skeleton extension is properly initialized.');
+      stream.markdown('⚠️ No LM tools available after applying priority/restrictions. Please ensure AI Skeleton and MCP servers are initialized.');
       return;
     }
 
-    // Build messages array: system prompt + user query
-    const messages: vscode.LanguageModelChatMessage[] = [
-      vscode.LanguageModelChatMessage.User(`[SYSTEM PROMPT]\n${SYSTEM_PROMPT}`),
-      vscode.LanguageModelChatMessage.User(request.prompt)
-    ];
+    // Build availability summary (token-light, trims if large)
+    let availabilitySummary = formatAvailabilitySummary(registry.summary, {
+      includeBlocked: registry.summary.blockedCount > 0,
+      maxNames: 5
+    });
+    const countsOnlySummary = formatAvailabilitySummary(registry.summary, {
+      includeBlocked: registry.summary.blockedCount > 0,
+      maxNames: 0
+    });
+
+    const summaryTokens = await estimateTokens(model, availabilitySummary);
+    if (summaryTokens > AVAILABILITY_TOKEN_CEILING) {
+      console.log('[ChatParticipant] Availability summary trimmed to counts-only. Tokens:', summaryTokens);
+      availabilitySummary = countsOnlySummary;
+    }
+
+    // KEYWORD DETECTION: Check if user input contains trigger words
+    // If detected, inject concise summary to guide LM autonomously (context-efficient)
+    let systemPrompt = SYSTEM_PROMPT;
+    const detectedKeyword = detectKeyword(request.prompt);
+    
+    if (detectedKeyword) {
+      console.log('[ChatParticipant] Keyword detected:', detectedKeyword.keyword, 'prompt:', detectedKeyword.promptKey);
+      console.log('[ChatParticipant] Injecting concise summary (~50 tokens) instead of full prompt');
+      
+      // Inject SUMMARY guidance (50 tokens) instead of full prompt (500+ tokens)
+      // This conserves context while still guiding LM autonomously
+      systemPrompt = `${SYSTEM_PROMPT}
+
+[${detectedKeyword.promptKey.toUpperCase()} MODE]
+${detectedKeyword.summary}`;
+      
+      console.log('[ChatParticipant] Injected summary for:', detectedKeyword.promptKey);
+    }
+
+    // PRE-FETCH MEMORY: Load RELEVANT memory content BEFORE sending to LM
+    // Use smart context selection with relevance scoring + token budget
+    // This ensures concise, targeted context instead of dumping entire database
+    let preloadedMemory = '';
+    let contextCoverage = '';
+    try {
+      console.log('[ChatParticipant] Pre-fetching RELEVANT memory content via smart context selection');
+      const memoryService = getMemoryService();
+      
+      // Smart context selection with 50K token budget
+      // Uses relevance scoring, recency weighting, and priority multipliers
+      const contextResult = await memoryService.selectContextForBudget(
+        request.prompt, // User query for relevance matching
+        50000, // 50K token budget for context
+        {
+          minRelevanceThreshold: 0.1, // Include entries with >10% relevance
+          maxAgeDays: 90 // Only entries from last 90 days
+        }
+      );
+      
+      preloadedMemory = contextResult.formattedContext;
+      contextCoverage = contextResult.coverage;
+      console.log('[ChatParticipant] Smart context selection:', contextCoverage);
+      console.log('[ChatParticipant] Selected context length:', preloadedMemory.length, 'chars');
+    } catch (err) {
+      console.error('[ChatParticipant] Failed to pre-load memory:', err);
+      // Continue without preloaded memory - fallback will still work
+    }
+
+    // Build messages array: system prompt (with optional injected guidance) + availability summary + preloaded memory + user query
+    const messages: vscode.LanguageModelChatMessage[] = [];
+    const messageStrings: string[] = [];
+
+    const systemMessage = vscode.LanguageModelChatMessage.User(`[SYSTEM PROMPT]\n${systemPrompt}`);
+    messages.push(systemMessage);
+    messageStrings.push(systemPrompt);
+
+    let availabilityMessage: vscode.LanguageModelChatMessage | undefined;
+    if (availabilitySummary) {
+      availabilityMessage = vscode.LanguageModelChatMessage.User(`[TOOL AVAILABILITY]\n${availabilitySummary}`);
+      messages.push(availabilityMessage);
+      messageStrings.push(availabilitySummary);
+    }
+    
+    // Include preloaded memory as context if available
+    if (preloadedMemory) {
+      messages.push(vscode.LanguageModelChatMessage.User(`[CURRENT MEMORY STATE]\n${preloadedMemory}`));
+      messageStrings.push(preloadedMemory);
+    }
+    
+    messages.push(vscode.LanguageModelChatMessage.User(request.prompt));
+    messageStrings.push(request.prompt);
+
+    // Pre-send budget check: drop availability header if we are close to the context window
+    const approxTokens = await estimateTokens(model, messageStrings.join('\n\n'));
+    const budgetLimit = CONTEXT_WINDOW - OUTPUT_BUFFER;
+    if (approxTokens > budgetLimit && availabilityMessage) {
+      console.log('[ChatParticipant] Dropping availability summary to stay within budget. Approx tokens:', approxTokens);
+      const idx = messages.indexOf(availabilityMessage);
+      if (idx >= 0) {
+        messages.splice(idx, 1);
+      }
+      const msgIdx = messageStrings.indexOf(availabilitySummary);
+      if (msgIdx >= 0) {
+        messageStrings.splice(msgIdx, 1);
+      }
+    }
 
     // Ensure we force at least one memory fetch even if the model does not emit tool calls
-    let forcedMemoryInvocation = false;
+    // Note: This is now a secondary fallback since we pre-fetch above
+    let forcedMemoryInvocation = preloadedMemory.length > 0;
 
     // Helper function to run tool calling loop
     const runToolCallingLoop = async (): Promise<void> => {
@@ -117,10 +238,10 @@ const handler: vscode.ChatRequestHandler = async (
       }
 
       console.log('[ChatParticipant] Sending request to model with', tools.length, 'tools available');
-      console.log('[ChatParticipant] Available tools:', tools.map(t => t.name).join(', '));
+      console.log('[ChatParticipant] Available tools:', (tools as any[]).map(t => (t as any).name).join(', '));
 
       // Send request to LM with available tools
-      const response = await model.sendRequest(messages, { tools }, token);
+      const response = await model.sendRequest(messages, { tools: tools as any }, token);
 
       let hasToolCalls = false;
 
@@ -140,7 +261,7 @@ const handler: vscode.ChatRequestHandler = async (
           stream.markdown(part.value);
         } else if (part instanceof vscode.LanguageModelToolCallPart) {
           // Collect tool calls for processing
-          console.log('[ChatParticipant] Received tool call:', part.name, 'with input:', JSON.stringify(part.input).substring(0, 100));
+          console.log('[ChatParticipant] Received tool call:', part.name, 'source:', toolSourceMap.get(part.name) ?? 'unknown', 'with input:', JSON.stringify(part.input).substring(0, 100));
           hasToolCalls = true;
           toolCalls.push({ part, index: responseIndex });
           responseIndex++;
@@ -163,7 +284,7 @@ const handler: vscode.ChatRequestHandler = async (
 
         for (const { part: toolCall } of toolCalls) {
           try {
-            console.log('[ChatParticipant] Invoking tool:', toolCall.name, 'with callId:', toolCall.callId);
+            console.log('[ChatParticipant] Invoking tool:', toolCall.name, 'source:', toolSourceMap.get(toolCall.name) ?? 'unknown', 'with callId:', toolCall.callId);
             // Invoke the tool with the provided input
             const toolResult = await vscode.lm.invokeTool(
               toolCall.name,

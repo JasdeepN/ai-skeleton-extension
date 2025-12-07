@@ -2,7 +2,7 @@
   "name": "ai-skeleton-extension",
   "displayName": "AI Skeleton Prompts & Memory",
   "description": "Complete AI agent toolkit: Native memory management (AI-Memory), workflow prompts, MCP integration, and agent definitions.",
-  "version": "0.2.39",
+  "version": "0.2.311",
   "publisher": "JasdeepN",
   "license": "SEE LICENSE IN LICENSE",
   "repository": {
@@ -61,6 +61,24 @@
           "type": "boolean",
           "default": false,
           "description": "Automatically start MCP servers defined in .vscode/mcp.json on startup. Prompts on first run."
+        },
+        "aiSkeleton.mcp.priority": {
+          "type": "string",
+          "enum": [
+            "mcp",
+            "extension",
+            "mixed"
+          ],
+          "default": "mcp",
+          "description": "Tool priority order for the unified registry. mcp = MCP tools first (default), extension = extension tools first, mixed = interleave sources."
+        },
+        "aiSkeleton.restrictions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "List of tool names/globs/regex patterns to block from the unified registry (applied before exposing tools to the model)."
         }
       }
     },

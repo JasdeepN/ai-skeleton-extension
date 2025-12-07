@@ -6,6 +6,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { getMemoryStore, MemoryStore, MemoryEntry as StoreMemoryEntry } from './memoryStore';
 import { exportSQLiteToMarkdown, createBackupMarkdown } from './memoryExport';
+import RelevanceScorer, { ScoredEntry } from './relevanceScorer';
 
 export interface MemoryBankState {
   active: boolean;
@@ -618,6 +619,122 @@ export class MemoryBankService {
     }
 
     return snapshot;
+  }
+
+  /**
+   * Select relevant context entries for a given query/task within a token budget
+   * Uses relevance scoring + recency weighting + priority multipliers
+   * 
+   * @param query User query or task description for relevance matching
+   * @param tokenBudget Maximum tokens to allocate to context (e.g., 50000)
+   * @param options Additional options
+   * @returns Selected entries formatted for LM consumption
+   */
+  async selectContextForBudget(
+    query: string,
+    tokenBudget: number = 50000,
+    options?: {
+      minRelevanceThreshold?: number;
+      includeTypes?: StoreMemoryEntry['file_type'][];
+      maxAgeDays?: number;
+    }
+  ): Promise<{
+    entries: StoreMemoryEntry[];
+    formattedContext: string;
+    tokensUsed: number;
+    coverage: string;
+  }> {
+    const opts = {
+      minRelevanceThreshold: 0.1,
+      maxAgeDays: 90,
+      ...options
+    };
+
+    // Get all entries from database
+    const store = getMemoryStore();
+    let allEntries: StoreMemoryEntry[] = [];
+
+    // Query by type if specified, otherwise get all
+    if (opts.includeTypes && opts.includeTypes.length > 0) {
+      for (const type of opts.includeTypes) {
+        const result = await store.queryByType(type);
+        if (result.entries) {
+          allEntries.push(...result.entries);
+        }
+      }
+    } else {
+      // Get all entry types
+      const types: StoreMemoryEntry['file_type'][] = ['CONTEXT', 'DECISION', 'PROGRESS', 'PATTERN', 'BRIEF'];
+      for (const type of types) {
+        const result = await store.queryByType(type);
+        if (result.entries) {
+          allEntries.push(...result.entries);
+        }
+      }
+    }
+
+    // Filter by age if specified
+    if (opts.maxAgeDays) {
+      const cutoffDate = new Date();
+      cutoffDate.setDate(cutoffDate.getDate() - opts.maxAgeDays);
+      const cutoffISO = cutoffDate.toISOString();
+      allEntries = allEntries.filter(e => e.timestamp >= cutoffISO);
+    }
+
+    // Score all entries for relevance
+    const scorer = RelevanceScorer;
+    const scoredEntries = scorer.scoreEntries(allEntries, query);
+
+    // Filter by minimum relevance threshold
+    const relevantEntries = scorer.filterByThreshold(scoredEntries, opts.minRelevanceThreshold);
+
+    // Rank by score (highest first)
+    const rankedEntries = scorer.rankEntries(relevantEntries);
+
+    // Greedy selection: add entries until budget exhausted
+    const selectedEntries: StoreMemoryEntry[] = [];
+    let tokensUsed = 0;
+
+    for (const scored of rankedEntries) {
+      // Estimate tokens for this entry (rough: ~4 chars per token)
+      const entryText = this.formatEntryForContext(scored.entry);
+      const estimatedTokens = Math.ceil(entryText.length / 4);
+
+      // Check if adding this entry would exceed budget
+      if (tokensUsed + estimatedTokens <= tokenBudget) {
+        selectedEntries.push(scored.entry);
+        tokensUsed += estimatedTokens;
+      } else {
+        // Budget exhausted, stop selection
+        break;
+      }
+    }
+
+    // Format selected entries for LM consumption
+    const formattedContext = selectedEntries.map(e => this.formatEntryForContext(e)).join('\n\n---\n\n');
+
+    // Calculate coverage stats
+    const coverage = `Selected ${selectedEntries.length}/${allEntries.length} entries (${Math.round((selectedEntries.length / allEntries.length) * 100)}%) | Tokens: ${tokensUsed}/${tokenBudget}`;
+
+    return {
+      entries: selectedEntries,
+      formattedContext,
+      tokensUsed,
+      coverage
+    };
+  }
+
+  /**
+   * Format a single memory entry for LM context (Markdown + YAML)
+   * Optimized for token efficiency
+   */
+  private formatEntryForContext(entry: StoreMemoryEntry): string {
+    const date = entry.timestamp.split('T')[0]; // YYYY-MM-DD
+    const tag = entry.tag || '';
+    
+    // Markdown format with YAML-style metadata
+    return `[${entry.file_type}:${date}] ${tag}
+${entry.content.trim()}`;
   }
 }
 
