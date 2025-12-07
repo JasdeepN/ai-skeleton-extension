@@ -2,9 +2,11 @@
 // Provides token counting and budgeting for LLM agents
 // Uses Anthropic SDK with js-tiktoken fallback for offline scenarios
 
-import { Anthropic } from '@anthropic-ai/sdk';
 import { encodingForModel } from 'js-tiktoken';
 import { MemoryStore } from './memoryStore';
+
+// Lazy import for Anthropic SDK (optional dependency, only loaded if API key present)
+let Anthropic: any = null;
 
 export interface TokenCountRequest {
   model: string;
@@ -84,7 +86,7 @@ class TokenCountCache {
  */
 export class TokenCounterService {
   private static instance: TokenCounterService;
-  private anthropicClient: Anthropic | null = null;
+  private anthropicClient: any | null = null;
   private cache = new TokenCountCache();
   private memoryStore: MemoryStore | null = null;
   private tokenMetricsBuffer: Array<{
@@ -100,7 +102,16 @@ export class TokenCounterService {
     // Initialize Anthropic client if API key is available
     const apiKey = process.env.ANTHROPIC_API_KEY;
     if (apiKey) {
-      this.anthropicClient = new Anthropic({ apiKey });
+      try {
+        // Lazy import Anthropic SDK only when needed
+        if (!Anthropic) {
+          Anthropic = require('@anthropic-ai/sdk').Anthropic;
+        }
+        this.anthropicClient = new Anthropic({ apiKey });
+      } catch (error) {
+        console.warn('[TokenCounterService] Anthropic SDK not available, using offline estimation:', error);
+        // Will fall back to offline token estimation
+      }
     }
   }
 
