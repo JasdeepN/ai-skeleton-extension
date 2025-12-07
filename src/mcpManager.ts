@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import * as path from 'path';
 
 interface MCPConfig {
   servers: Record<string, any>;
@@ -69,7 +70,20 @@ export async function startMCPServers(context: vscode.ExtensionContext): Promise
       }
 
       const terminal = vscode.window.createTerminal({ name: termName, iconPath: new vscode.ThemeIcon('plug') });
-      const commandLine = [command, ...escapedArgs].join(' ');
+
+      // If the command uses uvx, ensure we run it with a clean Python environment to avoid
+      // leaking user/site packages (e.g., ESP-IDF) that can break mcp-server-* dependencies.
+      const isUv = path.basename(command) === 'uvx' || command.includes('uvx ');
+      let commandLine = [command, ...escapedArgs].join(' ');
+
+      if (isUv) {
+        if (process.platform === 'win32') {
+          // Best-effort Windows equivalent: clear PYTHONPATH and disable user site packages
+          commandLine = `set PYTHONPATH=& set PYTHONNOUSERSITE=1& ${commandLine}`;
+        } else {
+          commandLine = `env -u PYTHONPATH PYTHONNOUSERSITE=1 ${commandLine}`;
+        }
+      }
       terminal.sendText(commandLine, true);
       terminal.show(false);
       context.subscriptions.push(terminal);

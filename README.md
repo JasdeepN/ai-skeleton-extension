@@ -238,6 +238,8 @@ scripts/uvx-clean.sh mcp-server-fetch --help
 
 The wrapper unsets `PYTHONPATH` and enables `PYTHONNOUSERSITE=1`, preventing conflicting site-packages from being injected.
 
+Note: When you start MCP servers via the extension (using `.vscode/mcp.json`), `uvx` commands are automatically wrapped with this clean environment so you don't have to do anything extra inside VS Code.
+
 ### Can I use this without the extension?
 
 Yes! The prompts and agents work standalone:
