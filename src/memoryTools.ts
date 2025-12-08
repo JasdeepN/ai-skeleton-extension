@@ -6,6 +6,67 @@
 import * as vscode from 'vscode';
 import { getMemoryService } from './memoryService';
 import { getMemoryStore } from './memoryStore';
+import { detectPhase } from './phaseDetector';
+import { synthesizeResearchReport, synthesizePlanReport, synthesizeExecutionReport } from './reportSynthesizer';
+
+/**
+ * Generic wrapper for memory tools to eliminate boilerplate
+ * Handles token counting, metrics logging, and phase detection
+ */
+function createMemoryTool<T extends Record<string, any>>(
+  name: string,
+  operationName: string,
+  handler: (input: T, service: ReturnType<typeof getMemoryService>) => Promise<boolean>,
+  prepareFn?: (input: T) => Omit<vscode.PreparedToolInvocation, 'parameters'>
+): vscode.LanguageModelTool<T> {
+  return {
+    async invoke(
+      options: vscode.LanguageModelToolInvocationOptions<T>,
+      _token: vscode.CancellationToken
+    ): Promise<vscode.LanguageModelToolResult> {
+      // Count input tokens
+      const inputTokens = await options.tokenizationOptions?.countTokens(JSON.stringify(options.input)) ?? 0;
+      
+      const service = getMemoryService();
+      const success = await handler(options.input, service);
+      
+      const message = success
+        ? `✓ ${name} completed`
+        : `✗ Failed to ${operationName}. AI-Memory may not be initialized.`;
+
+      // Count output tokens
+      const outputTokens = await options.tokenizationOptions?.countTokens(message) ?? 0;
+      
+      // Log metrics asynchronously (non-blocking)
+      void getMemoryStore().logTokenMetric({
+        timestamp: new Date().toISOString(),
+        model: 'unknown',
+        input_tokens: inputTokens,
+        output_tokens: outputTokens,
+        total_tokens: inputTokens + outputTokens,
+        operation: operationName,
+        context_status: 'healthy'
+      });
+
+      return new vscode.LanguageModelToolResult([
+        new vscode.LanguageModelTextPart(message)
+      ]);
+    },
+
+    prepareInvocation(
+      options: vscode.LanguageModelToolInvocationPrepareOptions<T>,
+      _token: vscode.CancellationToken
+    ) {
+      if (prepareFn) {
+        return { 
+          ...prepareFn(options.input),
+          parameters: options.input 
+        };
+      }
+      return { invocationMessage: `${name}...`, parameters: options.input };
+    }
+  };
+}
 
 // Tool parameter interfaces
 interface ShowMemoryParams {
@@ -61,10 +122,52 @@ interface UpdateBriefParams {
   };
 }
 
+interface SaveResearchParams {
+  content?: string;  // Optional - will be auto-synthesized if not provided
+  metadata?: {
+    progress?: 'done' | 'in-progress' | 'draft' | 'deprecated';
+    targets?: ('ui' | 'db' | 'refactor' | 'tests' | 'docs' | 'perf' | 'integration' | 'infra')[];
+    phase?: 'research' | 'planning' | 'execution' | 'checkpoint';
+  };
+}
+
+interface SavePlanParams {
+  content?: string;  // Optional - will be auto-synthesized if not provided
+  metadata?: {
+    progress?: 'done' | 'in-progress' | 'draft' | 'deprecated';
+    targets?: ('ui' | 'db' | 'refactor' | 'tests' | 'docs' | 'perf' | 'integration' | 'infra')[];
+    phase?: 'research' | 'planning' | 'execution' | 'checkpoint';
+  };
+}
+
+interface SaveExecutionParams {
+  content?: string;  // Optional - will be auto-synthesized if not provided
+  metadata?: {
+    progress?: 'done' | 'in-progress' | 'draft' | 'deprecated';
+    targets?: ('ui' | 'db' | 'refactor' | 'tests' | 'docs' | 'perf' | 'integration' | 'infra')[];
+    phase?: 'research' | 'planning' | 'execution' | 'checkpoint';
+  };
+}
+
 interface MarkDeprecatedParams {
   file: string; // Accepts: context, decision, progress, patterns, brief (no .md extension)
   item: string;
   reason: string;
+}
+
+interface EditEntryParams {
+  id: number;
+  updates: {
+    content?: string;
+    tag?: string;
+    phase?: 'research' | 'planning' | 'execution' | 'checkpoint';
+    progress_status?: 'done' | 'in-progress' | 'draft' | 'deprecated';
+  };
+}
+
+interface AppendToEntryParams {
+  id: number;
+  additionalContent: string;
 }
 
 // Memory tools use SQLite backend - no file validation needed
@@ -130,239 +233,223 @@ export class ShowMemoryTool implements vscode.LanguageModelTool<ShowMemoryParams
 /**
  * Tool: Log a decision
  */
-export class LogDecisionTool implements vscode.LanguageModelTool<LogDecisionParams> {
-  async invoke(
-    options: vscode.LanguageModelToolInvocationOptions<LogDecisionParams>,
-    _token: vscode.CancellationToken
-  ): Promise<vscode.LanguageModelToolResult> {
-    // Count input tokens
-    const inputTokens = await options.tokenizationOptions?.countTokens(JSON.stringify(options.input)) ?? 0;
-    
-    const service = getMemoryService();
-    const { decision, rationale } = options.input;
-
-    const success = await service.logDecision(decision, rationale);
-    const message = success
-      ? `✓ Decision logged: "${decision}"`
-      : `✗ Failed to log decision. AI-Memory may not be initialized.`;
-
-    // Count output tokens
-    const outputTokens = await options.tokenizationOptions?.countTokens(message) ?? 0;
-    
-    // Log metrics asynchronously (non-blocking)
-    void getMemoryStore().logTokenMetric({
-      timestamp: new Date().toISOString(),
-      model: 'unknown',
-      input_tokens: inputTokens,
-      output_tokens: outputTokens,
-      total_tokens: inputTokens + outputTokens,
-      operation: 'logDecision',
-      context_status: 'healthy'
-    });
-
-    return new vscode.LanguageModelToolResult([
-      new vscode.LanguageModelTextPart(message)
-    ]);
-  }
-
-  async prepareInvocation(
-    options: vscode.LanguageModelToolInvocationPrepareOptions<LogDecisionParams>,
-    _token: vscode.CancellationToken
-  ) {
-    return {
-      invocationMessage: `Logging decision: ${options.input.decision.slice(0, 50)}...`,
-      confirmationMessages: {
-        title: 'Log Decision to AI-Memory',
-        message: new vscode.MarkdownString(
-          `Log this decision?\n\n**Decision:** ${options.input.decision}\n\n**Rationale:** ${options.input.rationale}`
-        ),
-      },
-    };
-  }
-}
+export const LogDecisionTool = createMemoryTool<LogDecisionParams>(
+  'Decision logged',
+  'logDecision',
+  async (input, service) => {
+    const { decision, rationale } = input;
+    const detectedPhase = input.metadata?.phase || (await detectPhase());
+    const metadata = detectedPhase ? { phase: detectedPhase } : undefined;
+    return service.logDecision(decision, rationale, metadata);
+  },
+  (input) => ({
+    invocationMessage: `Logging decision: ${input.decision.slice(0, 50)}...`,
+    confirmationMessages: {
+      title: 'Log Decision to AI-Memory',
+      message: new vscode.MarkdownString(
+        `Log this decision?\n\n**Decision:** ${input.decision}\n\n**Rationale:** ${input.rationale}`
+      ),
+    },
+  })
+);
 
 /**
  * Tool: Update active context
  */
-export class UpdateContextTool implements vscode.LanguageModelTool<UpdateContextParams> {
-  async invoke(
-    options: vscode.LanguageModelToolInvocationOptions<UpdateContextParams>,
-    _token: vscode.CancellationToken
-  ): Promise<vscode.LanguageModelToolResult> {
-    // Count input tokens
-    const inputTokens = await options.tokenizationOptions?.countTokens(JSON.stringify(options.input)) ?? 0;
-    
-    const service = getMemoryService();
-    const { context } = options.input;
-
-    const success = await service.updateContext(context);
-    const message = success
-      ? `✓ Context updated`
-      : `✗ Failed to update context. AI-Memory may not be initialized.`;
-
-    // Count output tokens
-    const outputTokens = await options.tokenizationOptions?.countTokens(message) ?? 0;
-    
-    // Log metrics asynchronously (non-blocking)
-    void getMemoryStore().logTokenMetric({
-      timestamp: new Date().toISOString(),
-      model: 'unknown',
-      input_tokens: inputTokens,
-      output_tokens: outputTokens,
-      total_tokens: inputTokens + outputTokens,
-      operation: 'updateContext',
-      context_status: 'healthy'
-    });
-
-    return new vscode.LanguageModelToolResult([
-      new vscode.LanguageModelTextPart(message)
-    ]);
-  }
-
-  async prepareInvocation(
-    options: vscode.LanguageModelToolInvocationPrepareOptions<UpdateContextParams>,
-    _token: vscode.CancellationToken
-  ) {
-    return {
-      invocationMessage: 'Updating active context',
-    };
-  }
-}
+export const UpdateContextTool = createMemoryTool<UpdateContextParams>(
+  'Context updated',
+  'updateContext',
+  async (input, service) => {
+    const { context } = input;
+    const detectedPhase = input.metadata?.phase || (await detectPhase());
+    const phase = (detectedPhase && detectedPhase !== 'checkpoint') ? detectedPhase : undefined;
+    return service.updateContext(context, phase);
+  },
+  () => ({
+    invocationMessage: 'Updating active context',
+  })
+);
 
 /**
  * Tool: Update progress
  */
-export class UpdateProgressTool implements vscode.LanguageModelTool<UpdateProgressParams> {
-  async invoke(
-    options: vscode.LanguageModelToolInvocationOptions<UpdateProgressParams>,
-    _token: vscode.CancellationToken
-  ): Promise<vscode.LanguageModelToolResult> {
-    // Count input tokens
-    const inputTokens = await options.tokenizationOptions?.countTokens(JSON.stringify(options.input)) ?? 0;
-    
-    const service = getMemoryService();
-    const { item, status } = options.input;
-
-    const success = await service.updateProgress(item, status);
-    const message = success
-      ? `✓ Progress updated: ${item} → ${status}`
-      : `✗ Failed to update progress. AI-Memory may not be initialized.`;
-
-    // Count output tokens
-    const outputTokens = await options.tokenizationOptions?.countTokens(message) ?? 0;
-    
-    // Log metrics asynchronously (non-blocking)
-    void getMemoryStore().logTokenMetric({
-      timestamp: new Date().toISOString(),
-      model: 'unknown',
-      input_tokens: inputTokens,
-      output_tokens: outputTokens,
-      total_tokens: inputTokens + outputTokens,
-      operation: 'updateProgress',
-      context_status: 'healthy'
-    });
-
-    return new vscode.LanguageModelToolResult([
-      new vscode.LanguageModelTextPart(message)
-    ]);
-  }
-
-  async prepareInvocation(
-    options: vscode.LanguageModelToolInvocationPrepareOptions<UpdateProgressParams>,
-    _token: vscode.CancellationToken
-  ) {
-    return {
-      invocationMessage: `Updating progress: ${options.input.item} → ${options.input.status}`,
-    };
-  }
-}
+export const UpdateProgressTool = createMemoryTool<UpdateProgressParams>(
+  'Progress updated',
+  'updateProgress',
+  async (input, service) => {
+    const { item, status } = input;
+    const detectedPhase = input.metadata?.phase || (await detectPhase());
+    const phase = (detectedPhase && detectedPhase !== 'checkpoint') ? detectedPhase : undefined;
+    return service.updateProgress(item, status, phase);
+  },
+  (input) => ({
+    invocationMessage: `Updating progress: ${input.item} → ${input.status}`,
+  })
+);
 
 /**
  * Tool: Update system patterns (includes architecture)
  */
-export class UpdatePatternsTool implements vscode.LanguageModelTool<UpdatePatternsParams> {
-  async invoke(
-    options: vscode.LanguageModelToolInvocationOptions<UpdatePatternsParams>,
-    _token: vscode.CancellationToken
-  ): Promise<vscode.LanguageModelToolResult> {
-    // Count input tokens
-    const inputTokens = await options.tokenizationOptions?.countTokens(JSON.stringify(options.input)) ?? 0;
-    
-    const service = getMemoryService();
-    const { pattern, description } = options.input;
-
-    const success = await service.updateSystemPatterns(pattern, description);
-    const message = success
-      ? `✓ Pattern recorded: ${pattern}`
-      : `✗ Failed to record pattern. AI-Memory may not be initialized.`;
-
-    // Count output tokens
-    const outputTokens = await options.tokenizationOptions?.countTokens(message) ?? 0;
-    
-    // Log metrics asynchronously (non-blocking)
-    void getMemoryStore().logTokenMetric({
-      timestamp: new Date().toISOString(),
-      model: 'unknown',
-      input_tokens: inputTokens,
-      output_tokens: outputTokens,
-      total_tokens: inputTokens + outputTokens,
-      operation: 'updatePatterns',
-      context_status: 'healthy'
-    });
-
-    return new vscode.LanguageModelToolResult([
-      new vscode.LanguageModelTextPart(message)
-    ]);
-  }
-
-  async prepareInvocation(
-    options: vscode.LanguageModelToolInvocationPrepareOptions<UpdatePatternsParams>,
-    _token: vscode.CancellationToken
-  ) {
-    return {
-      invocationMessage: `Recording pattern: ${options.input.pattern}`,
-    };
-  }
-}
+export const UpdatePatternsTool = createMemoryTool<UpdatePatternsParams>(
+  'Pattern recorded',
+  'updatePatterns',
+  async (input, service) => {
+    const { pattern, description } = input;
+    const detectedPhase = input.metadata?.phase || (await detectPhase());
+    const phase = (detectedPhase && detectedPhase !== 'checkpoint') ? detectedPhase : undefined;
+    return service.updateSystemPatterns(pattern, description, phase);
+  },
+  (input) => ({
+    invocationMessage: `Recording pattern: ${input.pattern}`,
+  })
+);
 
 /**
  * Tool: Update project brief (includes product context)
  */
-export class UpdateProjectBriefTool implements vscode.LanguageModelTool<UpdateBriefParams> {
-  async invoke(
-    options: vscode.LanguageModelToolInvocationOptions<UpdateBriefParams>,
-    _token: vscode.CancellationToken
-  ): Promise<vscode.LanguageModelToolResult> {
-    // Count input tokens
-    const inputTokens = await options.tokenizationOptions?.countTokens(JSON.stringify(options.input)) ?? 0;
-    
-    const service = getMemoryService();
-    const success = await service.updateProjectBrief(options.input.content);
-    const message = success ? '✓ Project brief updated' : '✗ Failed to update project brief';
-    
-    // Count output tokens
-    const outputTokens = await options.tokenizationOptions?.countTokens(message) ?? 0;
-    
-    // Log metrics asynchronously (non-blocking)
-    void getMemoryStore().logTokenMetric({
-      timestamp: new Date().toISOString(),
-      model: 'unknown',
-      input_tokens: inputTokens,
-      output_tokens: outputTokens,
-      total_tokens: inputTokens + outputTokens,
-      operation: 'updateProjectBrief',
-      context_status: 'healthy'
-    });
-    
-    return new vscode.LanguageModelToolResult([
-      new vscode.LanguageModelTextPart(message)
-    ]);
-  }
+export const UpdateProjectBriefTool = createMemoryTool<UpdateBriefParams>(
+  'Project brief updated',
+  'updateProjectBrief',
+  async (input, service) => {
+    const detectedPhase = input.metadata?.phase || (await detectPhase());
+    const phase = (detectedPhase && detectedPhase !== 'checkpoint') ? detectedPhase : undefined;
+    return service.updateProjectBrief(input.content, phase);
+  },
+  () => ({
+    invocationMessage: 'Updating project brief',
+  })
+);
 
-  async prepareInvocation() {
-    return { invocationMessage: 'Updating project brief' };
-  }
-}
+/**
+ * Tool: Save research findings (from Think.prompt.md workflow)
+ * Saves to RESEARCH_REPORT type
+ * 
+ * SMART: If no content provided, auto-synthesizes report from recent decisions/context
+ */
+export const SaveResearchTool = createMemoryTool<SaveResearchParams>(
+  'Research saved',
+  'saveResearch',
+  async (input, service) => {
+    let content = input.content;
+    
+    // If no content provided, auto-synthesize from memory context
+    if (!content || content.trim().length === 0) {
+      try {
+        const report = await synthesizeResearchReport({ reportType: 'research' });
+        content = report.content;
+        console.log('[SaveResearchTool] Auto-synthesized report from', report.sourceCount, 'memory entries');
+      } catch (err) {
+        console.error('[SaveResearchTool] Failed to auto-synthesize, falling back to empty report:', err);
+        content = 'Research findings (auto-generated - no memory entries found)';
+      }
+    }
+    
+    const detectedPhase = input.metadata?.phase || (await detectPhase());
+    const phase = (detectedPhase && detectedPhase !== 'checkpoint') ? detectedPhase : undefined;
+    return service.saveResearch(content, phase);
+  },
+  () => ({
+    invocationMessage: 'Saving research findings (auto-synthesizing from memory)',
+  })
+);
+
+/**
+ * Tool: Save plan (from Plan.prompt.md workflow)
+ * Saves to PLAN_REPORT type
+ * 
+ * SMART: If no content provided, auto-synthesizes report from recent progress/decisions
+ */
+export const SavePlanTool = createMemoryTool<SavePlanParams>(
+  'Plan saved',
+  'savePlan',
+  async (input, service) => {
+    let content = input.content;
+    
+    // If no content provided, auto-synthesize from memory context
+    if (!content || content.trim().length === 0) {
+      try {
+        const report = await synthesizePlanReport({ reportType: 'plan' });
+        content = report.content;
+        console.log('[SavePlanTool] Auto-synthesized report from', report.sourceCount, 'memory entries');
+      } catch (err) {
+        console.error('[SavePlanTool] Failed to auto-synthesize, falling back to empty report:', err);
+        content = 'Implementation plan (auto-generated - no memory entries found)';
+      }
+    }
+    
+    const detectedPhase = input.metadata?.phase || (await detectPhase());
+    const phase = (detectedPhase && detectedPhase !== 'checkpoint') ? detectedPhase : undefined;
+    return service.savePlan(content, phase);
+  },
+  () => ({
+    invocationMessage: 'Saving implementation plan (auto-synthesizing from memory)',
+  })
+);
+
+/**
+ * Tool: Save execution summary (from Execute.prompt.md workflow)
+ * Saves to EXECUTION_REPORT type
+ * 
+ * SMART: If no content provided, auto-synthesizes report from recent progress/decisions/context
+ */
+export const SaveExecutionTool = createMemoryTool<SaveExecutionParams>(
+  'Execution summary saved',
+  'saveExecution',
+  async (input, service) => {
+    let content = input.content;
+    
+    // If no content provided, auto-synthesize from memory context
+    if (!content || content.trim().length === 0) {
+      try {
+        const report = await synthesizeExecutionReport({ reportType: 'execution' });
+        content = report.content;
+        console.log('[SaveExecutionTool] Auto-synthesized report from', report.sourceCount, 'memory entries');
+      } catch (err) {
+        console.error('[SaveExecutionTool] Failed to auto-synthesize, falling back to empty report:', err);
+        content = 'Execution summary (auto-generated - no memory entries found)';
+      }
+    }
+    
+    const detectedPhase = input.metadata?.phase || (await detectPhase());
+    const phase = (detectedPhase && detectedPhase !== 'checkpoint') ? detectedPhase : undefined;
+    return service.saveExecution(content, phase);
+  },
+  () => ({
+    invocationMessage: 'Saving execution summary (auto-synthesizing from memory)',
+  })
+);
+
+/**
+ * Tool: Edit an existing memory entry
+ * Allows correcting, refining, or updating previous entries
+ */
+export const EditEntryTool = createMemoryTool<EditEntryParams>(
+  'Entry edited',
+  'editEntry',
+  async (input, service) => {
+    const { id, updates } = input;
+    return service.editEntry(id, updates);
+  },
+  (input) => ({
+    invocationMessage: `Editing memory entry #${input.id}`,
+  })
+);
+
+/**
+ * Tool: Append additional content to an existing entry
+ * Useful for adding new discoveries without replacing original content
+ */
+export const AppendToEntryTool = createMemoryTool<AppendToEntryParams>(
+  'Content appended',
+  'appendToEntry',
+  async (input, service) => {
+    const { id, additionalContent } = input;
+    return service.appendToEntry(id, additionalContent);
+  },
+  (input) => ({
+    invocationMessage: `Appending to memory entry #${input.id}`,
+  })
+);
 
 /**
  * Tool: Mark item as deprecated
@@ -434,14 +521,30 @@ export function registerMemoryTools(context: vscode.ExtensionContext): void {
   try {
     context.subscriptions.push(
       vscode.lm.registerTool('aiSkeleton_showMemory', new ShowMemoryTool()),
-      vscode.lm.registerTool('aiSkeleton_logDecision', new LogDecisionTool()),
-      vscode.lm.registerTool('aiSkeleton_updateContext', new UpdateContextTool()),
-      vscode.lm.registerTool('aiSkeleton_updateProgress', new UpdateProgressTool()),
-      vscode.lm.registerTool('aiSkeleton_updatePatterns', new UpdatePatternsTool()),
-      vscode.lm.registerTool('aiSkeleton_updateProjectBrief', new UpdateProjectBriefTool()),
+      vscode.lm.registerTool('aiSkeleton_logDecision', LogDecisionTool),
+      vscode.lm.registerTool('aiSkeleton_updateContext', UpdateContextTool),
+      vscode.lm.registerTool('aiSkeleton_updateProgress', UpdateProgressTool),
+      vscode.lm.registerTool('aiSkeleton_updatePatterns', UpdatePatternsTool),
+      vscode.lm.registerTool('aiSkeleton_updateProjectBrief', UpdateProjectBriefTool),
+      vscode.lm.registerTool('aiSkeleton_saveResearch', SaveResearchTool),
+      vscode.lm.registerTool('aiSkeleton_savePlan', SavePlanTool),
+      vscode.lm.registerTool('aiSkeleton_saveExecution', SaveExecutionTool),
+      vscode.lm.registerTool('aiSkeleton_editEntry', EditEntryTool),
+      vscode.lm.registerTool('aiSkeleton_appendToEntry', AppendToEntryTool),
       vscode.lm.registerTool('aiSkeleton_markDeprecated', new MarkDeprecatedTool())
     );
-    console.log('[AI Skeleton] Memory tools registered successfully (7 LM tools)');
+    console.log('[AI Skeleton] Memory tools registered successfully (12 LM tools)');
+    
+    // Show transient notification about tool status
+    void vscode.window.withProgress({
+      location: vscode.ProgressLocation.Notification,
+      title: '✅ AI Skeleton memory tools ready',
+      cancellable: false
+    }, async (progress) => {
+      progress.report({ message: '12 tools registered and active' });
+      // Auto-dismiss after 3 seconds
+      await new Promise(resolve => setTimeout(resolve, 3000));
+    });
   } catch (err) {
     console.error('[AI Skeleton] Failed to register memory tools:', err);
     void vscode.window.showErrorMessage(`AI Skeleton: Failed to register memory tools: ${err}`);

@@ -27,6 +27,7 @@ class EmbeddingService {
   private transformersModule: any = null;
   private model: any = null;
   private sessionCount: number = 0;
+  private zeroVector: Float32Array = new Float32Array(384);
 
   private constructor(config?: Partial<EmbeddingConfig>) {
     this.config = {
@@ -99,14 +100,30 @@ class EmbeddingService {
       // Fallback: return mock for testing
       console.warn('[EmbeddingService] Transformers.js not available; using mock embeddings');
       return {
-        pipeline: async () => ({
-          __call__: (text: string) => {
-            // Mock embedding: deterministic hash-based for testing
-            return this.generateMockEmbedding(text);
-          },
-        }),
+        pipeline: async () => {
+          // Return a callable function that mimics the transformers pipeline signature
+          const mock = async (text: string) => ({ data: this.generateMockEmbedding(text) });
+          // Some callers may use __call__ instead of invoking as a function
+          (mock as any).__call__ = mock;
+          return mock;
+        },
       };
     }
+  }
+
+  /**
+   * Normalize model invocation for both real transformers pipeline and mock fallback
+   */
+  private getModelRunner(): (text: string) => Promise<any> {
+    if (typeof this.model === 'function') {
+      return async (text: string) => this.model(text, { pooling: 'mean', normalize: true });
+    }
+
+    if (this.model && typeof (this.model as any).__call__ === 'function') {
+      return async (text: string) => (this.model as any).__call__(text, { pooling: 'mean', normalize: true });
+    }
+
+    throw new Error('[EmbeddingService] Model is not callable');
   }
 
   /**
@@ -116,6 +133,14 @@ class EmbeddingService {
    * @returns EmbeddingResult with 384-dimensional vector
    */
   async embed(text: string, estimatedTokenCount: number = 0): Promise<EmbeddingResult> {
+    if (!text || !text.trim()) {
+      return {
+        embedding: this.zeroVector,
+        inputTokens: 0,
+        generatedAt: new Date().toISOString(),
+      };
+    }
+
     if (!this.modelLoaded) {
       await this.initialize();
     }
@@ -126,15 +151,17 @@ class EmbeddingService {
 
     try {
       const startTime = performance.now();
-      
-      // Generate embedding via model
-      const output = await this.model(text, { pooling: 'mean', normalize: true });
+      const runModel = this.getModelRunner();
+      // Generate embedding via model (real or mock)
+      const output = await runModel(text);
+
+      const normalized = this.normalizeEmbeddingOutput(output);
       
       const duration = performance.now() - startTime;
       console.log(`[EmbeddingService] Embedded text (${text.length} chars) in ${duration.toFixed(0)}ms`);
 
       return {
-        embedding: new Float32Array(output.data || output),
+        embedding: normalized,
         inputTokens: estimatedTokenCount || Math.ceil(text.length / 4), // Rough estimate: 1 token ≈ 4 chars
         generatedAt: new Date().toISOString(),
       };
@@ -154,6 +181,17 @@ class EmbeddingService {
     texts: string[],
     estimatedTokenCounts?: number[]
   ): Promise<EmbeddingResult[]> {
+    const cleanedTexts = texts.map((t) => t ?? '');
+
+    // Fast path: if every text is blank, return zero vectors
+    if (cleanedTexts.every((t) => !t.trim())) {
+      return cleanedTexts.map(() => ({
+        embedding: this.zeroVector,
+        inputTokens: 0,
+        generatedAt: new Date().toISOString(),
+      }));
+    }
+
     if (!this.modelLoaded) {
       await this.initialize();
     }
@@ -164,6 +202,7 @@ class EmbeddingService {
 
     const results: EmbeddingResult[] = [];
     const batchSize = this.config.batchSize;
+    const runModel = this.getModelRunner();
 
     console.log(`[EmbeddingService] Batch embedding ${texts.length} texts (batch size: ${batchSize})`);
 
@@ -177,17 +216,16 @@ class EmbeddingService {
         
         // Embed batch
         const outputs = await Promise.all(
-          batch.map((text, idx) =>
-            this.model(text, { pooling: 'mean', normalize: true })
-          )
+          batch.map((text) => text.trim() ? runModel(text) : { data: this.zeroVector })
         );
 
         const duration = performance.now() - startTime;
         console.log(`[EmbeddingService] Batch ${Math.floor(i / batchSize) + 1} embedded ${batch.length} texts in ${duration.toFixed(0)}ms`);
 
-        outputs.forEach((output, idx) => {
+        outputs.forEach((output: any, idx: number) => {
+          const normalized = this.normalizeEmbeddingOutput(output);
           results.push({
-            embedding: new Float32Array(output.data || output),
+            embedding: normalized,
             inputTokens: tokenBatch?.[idx] || Math.ceil(batch[idx]!.length / 4),
             generatedAt: new Date().toISOString(),
           });
@@ -199,6 +237,71 @@ class EmbeddingService {
     }
 
     return results;
+  }
+
+  /**
+   * Normalize arbitrary model output into a fixed-dimension Float32Array
+   * Handles nested arrays (token x dimension), typed arrays, or plain objects with data field.
+   */
+  private normalizeEmbeddingOutput(output: any): Float32Array {
+    const raw = this.flattenEmbedding(output?.data ?? output);
+    if (!raw.length) {
+      return this.zeroVector;
+    }
+
+    const dims = this.config.dimensions;
+
+    // Exact match
+    if (raw.length === dims) {
+      return new Float32Array(raw);
+    }
+
+    // If length is multiple of dims, assume [tokens x dims] and mean-pool
+    if (raw.length > dims && raw.length % dims === 0) {
+      const tokens = raw.length / dims;
+      const averaged = new Float32Array(dims);
+      for (let i = 0; i < raw.length; i++) {
+        averaged[i % dims]! += raw[i]!;
+      }
+      for (let i = 0; i < dims; i++) {
+        averaged[i] = averaged[i]! / tokens;
+      }
+      return averaged;
+    }
+
+    // If longer but not divisible, truncate to dims
+    if (raw.length > dims) {
+      return new Float32Array(raw.slice(0, dims));
+    }
+
+    // If shorter, pad with zeros
+    const padded = new Float32Array(dims);
+    for (let i = 0; i < raw.length && i < dims; i++) {
+      padded[i] = raw[i]!;
+    }
+    return padded;
+  }
+
+  /**
+   * Flatten nested arrays or typed arrays into a simple number[]
+   */
+  private flattenEmbedding(value: any): number[] {
+    const result: number[] = [];
+
+    const walk = (v: any) => {
+      if (typeof v === 'number') {
+        result.push(v);
+        return;
+      }
+      if (Array.isArray(v) || ArrayBuffer.isView(v)) {
+        for (const item of v as any) {
+          walk(item);
+        }
+      }
+    };
+
+    walk(value);
+    return result;
   }
 
   /**

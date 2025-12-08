@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { getMemoryService } from './memoryService';
 import { getPrompts } from './promptStore';
 import { MemoryStore } from './memoryStore';
+import { getLoggerChannel } from './logger';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -267,12 +268,11 @@ export function registerDiagnosticsView(context: vscode.ExtensionContext): Diagn
 
   context.subscriptions.push(vscode.commands.registerCommand('aiSkeleton.diagnostics.refresh', () => provider.refresh()));
 
-  const out = vscode.window.createOutputChannel('AI Skeleton Diagnostics');
-  context.subscriptions.push(out);
+  const out = getLoggerChannel();
 
   context.subscriptions.push(vscode.commands.registerCommand('aiSkeleton.diagnostics.runSelfTest', async () => {
-    out.clear();
     out.show(true);
+    out.appendLine('--- Diagnostics Self Test ---');
     const mode = context.extensionMode;
     out.appendLine(`Extension Mode: ${vscode.ExtensionMode[mode]}`);
     out.appendLine(`VS Code: ${vscode.version}`);

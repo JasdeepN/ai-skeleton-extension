@@ -21,7 +21,10 @@ function getFileNameForType(type: MemoryEntry['file_type']): string {
     DECISION: 'decisionLog.md',
     PROGRESS: 'progress.md',
     PATTERN: 'systemPatterns.md',
-    BRIEF: 'projectBrief.md'
+    BRIEF: 'projectBrief.md',
+    RESEARCH_REPORT: 'researchReport.md',
+    PLAN_REPORT: 'planReport.md',
+    EXECUTION_REPORT: 'executionReport.md'
   };
   return filenameMap[type];
 }

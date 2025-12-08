@@ -61,8 +61,9 @@ export class MemoryBankService {
   private _onDidChangeState = new vscode.EventEmitter<MemoryBankState>();
   readonly onDidChangeState = this._onDidChangeState.event;
 
-  constructor() {
-    this._store = getMemoryStore();
+  constructor(store?: MemoryStore) {
+    // Allow dependency injection for testing; default to singleton
+    this._store = store ?? getMemoryStore();
   }
 
   get state(): MemoryBankState {
@@ -264,6 +265,7 @@ export class MemoryBankService {
         tag,
         content: entry,
         metadata: metadataJson,
+        phase: (metadata?.phase as any) || null,
         progress_status: (metadata?.progress as any) || 'in-progress'
       });
       this.setActivity('write');
@@ -278,7 +280,7 @@ export class MemoryBankService {
   /**
    * Update active context
    */
-  async updateContext(context: string): Promise<boolean> {
+  async updateContext(context: string, phase?: 'research' | 'planning' | 'execution'): Promise<boolean> {
     if (!this._state.active) {
       await this.detectMemoryBank();
     }
@@ -294,7 +296,8 @@ export class MemoryBankService {
         file_type: 'CONTEXT',
         timestamp: new Date().toISOString(),
         tag,
-        content: context
+        content: context,
+        phase: phase || null
       });
       this.setActivity('write');
       this._cache.delete('CONTEXT');
@@ -308,7 +311,7 @@ export class MemoryBankService {
   /**
    * Update progress tracking
    */
-  async updateProgress(item: string, status: 'done' | 'doing' | 'next'): Promise<boolean> {
+  async updateProgress(item: string, status: 'done' | 'doing' | 'next', phase?: 'research' | 'planning' | 'execution'): Promise<boolean> {
     if (!this._state.active) {
       await this.detectMemoryBank();
     }
@@ -322,12 +325,19 @@ export class MemoryBankService {
     const section = status.charAt(0).toUpperCase() + status.slice(1);
     const content = `${section}: - ${marker} ${item}`;
 
+    // Map service status to database status enum
+    const dbStatus: 'done' | 'in-progress' | 'draft' | 'deprecated' | null = 
+      status === 'done' ? 'done' :
+      status === 'doing' ? 'in-progress' : null;
+
     try {
       await this._store.appendEntry({
         file_type: 'PROGRESS',
         timestamp: new Date().toISOString(),
         tag,
-        content
+        content,
+        phase: phase || null,
+        progress_status: dbStatus
       });
       this.setActivity('write');
       this._cache.delete('PROGRESS');
@@ -341,7 +351,7 @@ export class MemoryBankService {
   /**
    * Update system patterns
    */
-  async updateSystemPatterns(pattern: string, description: string): Promise<boolean> {
+  async updateSystemPatterns(pattern: string, description: string, phase?: 'research' | 'planning' | 'execution'): Promise<boolean> {
     if (!this._state.active) {
       await this.detectMemoryBank();
     }
@@ -358,7 +368,8 @@ export class MemoryBankService {
         file_type: 'PATTERN',
         timestamp: new Date().toISOString(),
         tag,
-        content
+        content,
+        phase: phase || null
       });
       this.setActivity('write');
       this._cache.delete('PATTERN');
@@ -372,7 +383,7 @@ export class MemoryBankService {
   /**
    * Update project brief
    */
-  async updateProjectBrief(content: string): Promise<boolean> {
+  async updateProjectBrief(content: string, phase?: 'research' | 'planning' | 'execution'): Promise<boolean> {
     if (!this._state.active) {
       await this.detectMemoryBank();
     }
@@ -388,13 +399,173 @@ export class MemoryBankService {
         file_type: 'BRIEF',
         timestamp: new Date().toISOString(),
         tag,
-        content
+        content,
+        phase: phase || null
       });
       this.setActivity('write');
       this._cache.delete('BRIEF');
       return true;
     } catch (err) {
       vscode.window.showErrorMessage(`Failed to update brief: ${err}`);
+      return false;
+    }
+  }
+
+  /**
+   * Save research findings (from Think.prompt.md workflow)
+   * Uses RESEARCH_REPORT file type to distinguish from project briefs
+   */
+  async saveResearch(content: string, phase?: 'research' | 'planning' | 'execution'): Promise<boolean> {
+    if (!this._state.active) {
+      await this.detectMemoryBank();
+    }
+    if (!this._state.active) {
+      const errorMsg = 'AI-Memory not found. Create one first (via AI Skeleton: Create Memory Bank command).';
+      console.error('[MemoryService]', errorMsg);
+      vscode.window.showErrorMessage(errorMsg);
+      return false;
+    }
+
+    const tag = `RESEARCH_REPORT:${this.getToday()}`;
+
+    try {
+      console.log('[MemoryService] saveResearch: Saving research brief to AI-Memory');
+      console.log('[MemoryService] saveResearch: Content length =', content.length, 'bytes');
+      console.log('[MemoryService] saveResearch: Tag =', tag);
+      
+      const entryId = await this._store.appendEntry({
+        file_type: 'RESEARCH_REPORT',
+        timestamp: new Date().toISOString(),
+        tag,
+        content,
+        phase: phase || 'research'
+      });
+      
+      console.log('[MemoryService] saveResearch: appendEntry returned ID:', entryId);
+      
+      if (!entryId) {
+        const errMsg = 'Failed to save research: Database returned null ID. This may indicate a database initialization issue.';
+        console.error('[MemoryService]', errMsg);
+        vscode.window.showErrorMessage(errMsg);
+        return false;
+      }
+      
+      console.log('[MemoryService] saveResearch: Successfully saved research brief with ID', entryId);
+      this.setActivity('write');
+      this._cache.delete('RESEARCH_REPORT');
+      vscode.window.showInformationMessage(`✓ Research brief saved (ID: ${entryId})`);
+      return true;
+    } catch (err) {
+      const errorMsg = `Failed to save research: ${err instanceof Error ? err.message : String(err)}`;
+      console.error('[MemoryService]', errorMsg);
+      console.error('[MemoryService] Full error:', err);
+      vscode.window.showErrorMessage(errorMsg);
+      return false;
+    }
+  }
+
+  /**
+   * Save plan (from Plan.prompt.md workflow)
+   * Uses PLAN_REPORT file type
+   */
+  async savePlan(content: string, phase?: 'research' | 'planning' | 'execution'): Promise<boolean> {
+    if (!this._state.active) {
+      await this.detectMemoryBank();
+    }
+    if (!this._state.active) {
+      const errorMsg = 'AI-Memory not found. Create one first (via AI Skeleton: Create Memory Bank command).';
+      console.error('[MemoryService]', errorMsg);
+      vscode.window.showErrorMessage(errorMsg);
+      return false;
+    }
+
+    const tag = `PLAN_REPORT:${this.getToday()}`;
+
+    try {
+      console.log('[MemoryService] savePlan: Saving implementation plan to AI-Memory');
+      console.log('[MemoryService] savePlan: Content length =', content.length, 'bytes');
+      console.log('[MemoryService] savePlan: Tag =', tag);
+      
+      const entryId = await this._store.appendEntry({
+        file_type: 'PLAN_REPORT',
+        timestamp: new Date().toISOString(),
+        tag,
+        content,
+        phase: phase || 'planning'
+      });
+      
+      console.log('[MemoryService] savePlan: appendEntry returned ID:', entryId);
+      
+      if (!entryId) {
+        const errMsg = 'Failed to save plan: Database returned null ID. This may indicate a database initialization issue.';
+        console.error('[MemoryService]', errMsg);
+        vscode.window.showErrorMessage(errMsg);
+        return false;
+      }
+      
+      console.log('[MemoryService] savePlan: Successfully saved plan with ID', entryId);
+      this.setActivity('write');
+      this._cache.delete('PLAN_REPORT');
+      vscode.window.showInformationMessage(`✓ Plan saved (ID: ${entryId})`);
+      return true;
+    } catch (err) {
+      const errorMsg = `Failed to save plan: ${err instanceof Error ? err.message : String(err)}`;
+      console.error('[MemoryService]', errorMsg);
+      console.error('[MemoryService] Full error:', err);
+      vscode.window.showErrorMessage(errorMsg);
+      return false;
+    }
+  }
+
+  /**
+   * Save execution summary (from Execute.prompt.md workflow)
+   * Uses EXECUTION_REPORT file type
+   */
+  async saveExecution(content: string, phase?: 'research' | 'planning' | 'execution'): Promise<boolean> {
+    if (!this._state.active) {
+      await this.detectMemoryBank();
+    }
+    if (!this._state.active) {
+      const errorMsg = 'AI-Memory not found. Create one first (via AI Skeleton: Create Memory Bank command).';
+      console.error('[MemoryService]', errorMsg);
+      vscode.window.showErrorMessage(errorMsg);
+      return false;
+    }
+
+    const tag = `EXECUTION_REPORT:${this.getToday()}`;
+
+    try {
+      console.log('[MemoryService] saveExecution: Saving execution report to AI-Memory');
+      console.log('[MemoryService] saveExecution: Content length =', content.length, 'bytes');
+      console.log('[MemoryService] saveExecution: Tag =', tag);
+      
+      const entryId = await this._store.appendEntry({
+        file_type: 'EXECUTION_REPORT',
+        timestamp: new Date().toISOString(),
+        tag,
+        content,
+        phase: phase || 'execution'
+      });
+      
+      console.log('[MemoryService] saveExecution: appendEntry returned ID:', entryId);
+      
+      if (!entryId) {
+        const errMsg = 'Failed to save execution: Database returned null ID. This may indicate a database initialization issue.';
+        console.error('[MemoryService]', errMsg);
+        vscode.window.showErrorMessage(errMsg);
+        return false;
+      }
+      
+      console.log('[MemoryService] saveExecution: Successfully saved execution report with ID', entryId);
+      this.setActivity('write');
+      this._cache.delete('EXECUTION_REPORT');
+      vscode.window.showInformationMessage(`✓ Execution report saved (ID: ${entryId})`);
+      return true;
+    } catch (err) {
+      const errorMsg = `Failed to save execution: ${err instanceof Error ? err.message : String(err)}`;
+      console.error('[MemoryService]', errorMsg);
+      console.error('[MemoryService] Full error:', err);
+      vscode.window.showErrorMessage(errorMsg);
       return false;
     }
   }
@@ -577,7 +748,10 @@ export class MemoryBankService {
       DECISION: [],
       PROGRESS: [],
       PATTERN: [],
-      BRIEF: []
+      BRIEF: [],
+      RESEARCH_REPORT: [],
+      PLAN_REPORT: [],
+      EXECUTION_REPORT: []
     };
 
     for (const type of Object.keys(latest) as StoreMemoryEntry['file_type'][]) {
@@ -704,8 +878,8 @@ export class MemoryBankService {
         }
       }
     } else {
-      // Get all entry types
-      const types: StoreMemoryEntry['file_type'][] = ['CONTEXT', 'DECISION', 'PROGRESS', 'PATTERN', 'BRIEF'];
+      // Get all entry types (including phase reports)
+      const types: StoreMemoryEntry['file_type'][] = ['CONTEXT', 'DECISION', 'PROGRESS', 'PATTERN', 'BRIEF', 'RESEARCH_REPORT', 'PLAN_REPORT', 'EXECUTION_REPORT'];
       for (const type of types) {
         const result = await store.queryByType(type);
         if (result.entries) {
@@ -1027,8 +1201,8 @@ ${entry.content.trim()}`;
    * Semantic search: find relevant entries using hybrid scoring
    * Combines keyword relevance (keyword matching) with semantic similarity
    * 
-   * Note: Semantic similarity requires embeddings to be pre-computed
-   * This is a placeholder for PHASE 7+ implementation
+   * Semantic Search: Find most relevant entries using embedding similarity + keyword matching
+   * Uses hybrid scoring: semantic similarity (via embeddings) + keyword relevance
    */
   async semanticSearch(
     query: string,
@@ -1043,7 +1217,62 @@ ${entry.content.trim()}`;
     const startTime = performance.now();
     
     try {
-      // Get all entries
+      // Import embedding utilities dynamically
+      const { getEmbeddingService, dequantizeEmbedding, cosineSimilarity } = await import('./embeddingService');
+
+      // Defensive fallback: if dequantizeEmbedding is missing (e.g., test mocks), provide a local converter
+      const safeDequantize = typeof dequantizeEmbedding === 'function'
+        ? dequantizeEmbedding
+        : (quantized: Uint8Array | Buffer | Float32Array): Float32Array => {
+            if (quantized instanceof Float32Array) return quantized;
+            const bytes = quantized instanceof Buffer ? new Uint8Array(quantized) : quantized;
+            if (bytes.length === 48) {
+              const restored = new Float32Array(384);
+              for (let i = 0; i < 384; i++) {
+                const byteIdx = Math.floor(i / 8);
+                const bitIdx = i % 8;
+                restored[i] = ((bytes[byteIdx]! >> bitIdx) & 1) === 1 ? 1 : -1;
+              }
+              return restored;
+            }
+            // Fallback: coerce to Float32Array preserving length
+            return new Float32Array(bytes);
+          };
+
+      // Defensive fallback: cosine similarity should always exist, but tests can mock without it
+      const safeCosineSimilarity = typeof cosineSimilarity === 'function'
+        ? cosineSimilarity
+        : (a: Float32Array, b: Float32Array): number => {
+            let dot = 0;
+            let normA = 0;
+            let normB = 0;
+            const len = Math.min(a.length, b.length);
+            for (let i = 0; i < len; i++) {
+              const va = a[i]!;
+              const vb = b[i]!;
+              dot += va * vb;
+              normA += va * va;
+              normB += vb * vb;
+            }
+            if (normA === 0 || normB === 0) return 0;
+            return dot / (Math.sqrt(normA) * Math.sqrt(normB));
+          };
+      
+      // Step 1: Generate embedding for the query
+      const embeddingService = getEmbeddingService();
+      let queryEmbedding: Float32Array | null = null;
+      
+      try {
+        const result = await embeddingService.embed(query);
+        queryEmbedding = result.embedding;
+      } catch (err) {
+        console.warn('[SemanticSearch] Failed to generate query embedding, falling back to keyword-only:', err);
+      }
+
+      // Step 2: Get entries with embeddings
+      const entriesWithEmbeddings = await this._store.queryEntriesWithEmbeddings(1000);
+      
+      // Step 3: Get all entries for keyword fallback
       const allResult = await this._store.queryByType('CONTEXT', 1000);
       const allResult2 = await this._store.queryByType('DECISION', 1000);
       const allResult3 = await this._store.queryByType('PROGRESS', 1000);
@@ -1058,10 +1287,10 @@ ${entry.content.trim()}`;
         ...allResult5.entries
       ];
 
-      // Score entries using keyword relevance (Phase 7+: add embedding similarity)
+      // Step 4: Score entries using hybrid approach
       const scored = allEntries.map(entry => {
-        // Keyword matching: simple presence-based scoring
-        const queryTerms = query.toLowerCase().split(/\s+/);
+        // Keyword matching: presence-based scoring
+        const queryTerms = query.toLowerCase().split(/\s+/).filter(t => t.length > 0);
         const entryText = (entry.tag + ' ' + entry.content).toLowerCase();
         
         let keywordScore = 0;
@@ -1070,20 +1299,50 @@ ${entry.content.trim()}`;
             keywordScore++;
           }
         }
-        // Normalize: divide by number of terms
-        keywordScore = keywordScore / Math.max(queryTerms.length, 1);
+        keywordScore = queryTerms.length > 0 ? keywordScore / queryTerms.length : 0;
 
-        // Semantic score: placeholder (0.5 default)
-        // TODO: Implement embedding similarity in PHASE 7
-        const semanticScore = 0.5;
+        // Semantic similarity score
+        let semanticScore = 0.5; // Default fallback if no embedding available
+        
+        if (queryEmbedding) {
+          // Find this entry in the embeddings list
+          const entryWithEmbedding = entriesWithEmbeddings.find(e => e.id === entry.id);
+          
+          if (entryWithEmbedding && entryWithEmbedding.embedding) {
+            try {
+              // Dequantize the stored embedding
+              const entryEmbedding = safeDequantize(entryWithEmbedding.embedding);
+              
+              // Calculate cosine similarity (-1 to 1, higher = more similar)
+              const similarity = safeCosineSimilarity(queryEmbedding, entryEmbedding);
+              
+              // Normalize to 0-1 range
+              semanticScore = (similarity + 1) / 2;
+            } catch (err) {
+              console.warn(`[SemanticSearch] Failed to compute similarity for entry ${entry.id}:`, err);
+            }
+          }
+        }
 
         // Hybrid score
         const score = semanticWeight * semanticScore + keywordWeight * keywordScore;
 
+        // Generate reason string
+        let reason = '';
+        if (semanticScore > 0.5 && keywordScore > 0) {
+          reason = `Semantic (${Math.round(semanticScore * 100)}%) + keyword (${Math.round(keywordScore * 100)}%)`;
+        } else if (semanticScore > 0.5) {
+          reason = `Semantic relevance (${Math.round(semanticScore * 100)}%)`;
+        } else if (keywordScore > 0) {
+          reason = `keyword match (${Math.round(keywordScore * 100)}%)`;
+        } else {
+          reason = 'Low relevance';
+        }
+
         return {
           entry,
           score,
-          reason: keywordScore > 0 ? `Keyword match (${Math.round(keywordScore * 100)}%)` : 'Semantic relevance',
+          reason,
         };
       });
 
@@ -1094,6 +1353,8 @@ ${entry.content.trim()}`;
         .slice(0, limit);
 
       const searchTime = performance.now() - startTime;
+
+      console.log(`[SemanticSearch] Found ${filtered.length} matches in ${searchTime.toFixed(0)}ms (${entriesWithEmbeddings.length}/${allEntries.length} entries have embeddings)`);
 
       return {
         entries: filtered.map(s => ({
@@ -1111,6 +1372,501 @@ ${entry.content.trim()}`;
         query,
         searchTime: performance.now() - startTime,
       };
+    }
+  }
+
+  /**
+   * Export entries by phase as markdown report
+   */
+  async exportReportByPhase(phase: 'research' | 'planning' | 'execution'): Promise<string | null> {
+    if (!this._state.active || !this._state.path) {
+      console.error('[MemoryService] Cannot export report: memory bank not active');
+      return null;
+    }
+
+    try {
+      const entries = await this._store.queryByPhase(phase);
+
+      if (entries.length === 0) {
+        console.warn(`[MemoryService] No entries found for phase: ${phase}`);
+        return null;
+      }
+
+      const report = this.generatePhaseReport(phase, entries);
+      return report;
+    } catch (err) {
+      console.error(`[MemoryService] Failed to export ${phase} report:`, err);
+      return null;
+    }
+  }
+
+  /**
+   * Save phase report to markdown file
+   */
+  async savePhaseReport(phase: 'research' | 'planning' | 'execution'): Promise<boolean> {
+    if (!this._state.active || !this._state.path) {
+      console.error('[MemoryService] Cannot save report: memory bank not active');
+      return false;
+    }
+
+    try {
+      const report = await this.exportReportByPhase(phase);
+      if (!report) {
+        return false;
+      }
+
+      const phaseUpper = phase.charAt(0).toUpperCase() + phase.slice(1);
+      const fileName = `${phaseUpper}_REPORT.md`;
+      const reportPath = vscode.Uri.joinPath(this._state.path, fileName);
+
+      await vscode.workspace.fs.writeFile(reportPath, Buffer.from(report, 'utf8'));
+      console.log(`[MemoryService] Saved ${phase} report to ${reportPath.fsPath}`);
+      return true;
+    } catch (err) {
+      console.error(`[MemoryService] Failed to save ${phase} report:`, err);
+      return false;
+    }
+  }
+
+  /**
+   * Generate phase report as memory entry (saved to database with vector tagging)
+   * Called on phase transitions to synthesize completed phase work
+   */
+  async generatePhaseMemoryReport(phase: 'research' | 'planning' | 'execution'): Promise<boolean> {
+    if (!this._state.active) {
+      console.error('[MemoryService] Cannot generate report: memory bank not active');
+      return false;
+    }
+
+    try {
+      const store = getMemoryStore();
+      
+      // Query all entries from this phase
+      const entries = await store.queryByPhase(phase, 1000);
+      if (!entries || entries.length === 0) {
+        console.warn(`[MemoryService] No entries found for ${phase} phase report`);
+        return false;
+      }
+
+      const timestamp = new Date().toISOString();
+      const lines: string[] = [];
+      
+      // Determine report type and file_type enum
+      let reportFileType: 'RESEARCH_REPORT' | 'PLAN_REPORT' | 'EXECUTION_REPORT';
+      let reportTitle: string;
+      
+      switch (phase) {
+        case 'research':
+          reportFileType = 'RESEARCH_REPORT';
+          reportTitle = 'Research Phase Summary';
+          break;
+        case 'planning':
+          reportFileType = 'PLAN_REPORT';
+          reportTitle = 'Planning Phase Summary';
+          break;
+        case 'execution':
+          reportFileType = 'EXECUTION_REPORT';
+          reportTitle = 'Execution Phase Summary';
+          break;
+      }
+
+      // Extract problem statement from CONTEXT entries
+      const contextEntries = entries.filter(e => e.file_type === 'CONTEXT');
+      const problemStatement = contextEntries.length > 0 
+        ? this.extractProblemStatement(contextEntries)
+        : `Continuing from ${phase} phase workflow`;
+
+      // Extract decisions and findings
+      const decisionEntries = entries.filter(e => e.file_type === 'DECISION');
+      const progressEntries = entries.filter(e => e.file_type === 'PROGRESS');
+
+      // Build Report using Think.prompt.md template structure
+      lines.push(`# Research Brief: ${reportTitle}`);
+      lines.push('');
+      
+      // Problem Statement
+      lines.push('## Problem Statement');
+      lines.push(problemStatement);
+      lines.push('');
+      
+      // Context
+      lines.push('## Context');
+      lines.push('');
+      lines.push('### Related Work');
+      if (decisionEntries.length > 0) {
+        decisionEntries.slice(0, 3).forEach((entry, idx) => {
+          const title = entry.tag?.split(':')[0] || `Decision ${idx + 1}`;
+          const snippet = entry.content.slice(0, 150).replace(/\n/g, ' ');
+          lines.push(`- [${title}] ${snippet}...`);
+        });
+      } else {
+        lines.push('- No prior decisions documented');
+      }
+      lines.push('');
+      
+      lines.push('### Current State');
+      if (progressEntries.length > 0) {
+        const latestProgress = progressEntries[0];
+        lines.push(`- Last update: ${latestProgress.timestamp.split('T')[0]}`);
+        lines.push(`- Total entries this phase: ${entries.length}`);
+        lines.push(`- Decisions made: ${decisionEntries.length}`);
+      } else {
+        lines.push(`- Total entries this phase: ${entries.length}`);
+      }
+      lines.push('');
+      
+      lines.push('### Constraints');
+      lines.push(`- Phase: ${phase}`);
+      lines.push('- Report generated automatically on phase completion');
+      lines.push('');
+      
+      // Research Findings
+      lines.push('## Research Findings');
+      lines.push('');
+      
+      lines.push('### Approach Options');
+      if (decisionEntries.length > 0) {
+        decisionEntries.forEach((entry, idx) => {
+          lines.push(`${idx + 1}. **Option ${idx + 1}**`);
+          lines.push(`   - Analysis: ${entry.content.slice(0, 100)}...`);
+        });
+      } else {
+        lines.push('1. Continue with current workflow');
+      }
+      lines.push('');
+      
+      lines.push('### Recommended Approach');
+      if (decisionEntries.length > 0) {
+        const firstDecision = decisionEntries[0];
+        lines.push(`Based on phase analysis: ${firstDecision.content.slice(0, 200).replace(/\n/g, ' ')}...`);
+      } else {
+        lines.push('No specific recommendations available - insufficient data');
+      }
+      lines.push('');
+      
+      lines.push('### Technical Considerations');
+      lines.push('');
+      lines.push('**Dependencies:**');
+      lines.push(`- Phase: ${phase}`);
+      lines.push(`- Entries analyzed: ${entries.length}`);
+      lines.push('');
+      
+      lines.push('**Integration Points:**');
+      const byType: Record<string, number> = {};
+      entries.forEach(e => {
+        byType[e.file_type] = (byType[e.file_type] || 0) + 1;
+      });
+      Object.entries(byType).forEach(([type, count]) => {
+        lines.push(`- ${type}: ${count} entries`);
+      });
+      lines.push('');
+      
+      lines.push('**Testing Strategy:**');
+      lines.push('- Validate phase transition completeness');
+      lines.push('- Ensure all critical decisions documented');
+      lines.push('- Verify progress tracking consistency');
+      lines.push('');
+      
+      lines.push('### Risks & Mitigations');
+      lines.push('');
+      lines.push('| Risk | Impact | Likelihood | Mitigation |');
+      lines.push('|------|--------|-----------|------------|');
+      lines.push('| Incomplete documentation | Medium | Low | Review all entries before phase end |');
+      lines.push('| Missing context | Medium | Medium | Supplement with manual notes |');
+      lines.push('| Phase confusion | Low | Low | Clear phase markers in all entries |');
+      lines.push('');
+      
+      // Implementation Readiness
+      lines.push('## Implementation Readiness');
+      lines.push('');
+      
+      lines.push('### Prerequisites');
+      lines.push('- [x] Phase entries collected');
+      lines.push('- [x] Decisions documented');
+      lines.push('- [x] Progress tracked');
+      lines.push('');
+      
+      lines.push('### Success Criteria');
+      lines.push(`- [x] Report generated at ${timestamp.split('T')[0]}`);
+      lines.push(`- [x] ${entries.length} entries processed`);
+      lines.push(`- [x] ${decisionEntries.length} key decisions captured`);
+      lines.push('');
+      
+      lines.push('### Next Steps');
+      if (phase === 'research') {
+        lines.push('1. Review findings from research phase');
+        lines.push('2. Begin planning phase with documented decisions');
+        lines.push('3. Identify approach options for implementation');
+      } else if (phase === 'planning') {
+        lines.push('1. Review plan from planning phase');
+        lines.push('2. Begin execution with clear tasks');
+        lines.push('3. Track progress against plan');
+      } else {
+        lines.push('1. Review execution summary');
+        lines.push('2. Assess completion against criteria');
+        lines.push('3. Plan next phase or iteration');
+      }
+      lines.push('');
+      
+      // References
+      lines.push('## References');
+      if (decisionEntries.length > 0) {
+        lines.push('');
+        lines.push('**Key Decisions:**');
+        decisionEntries.slice(0, 5).forEach(entry => {
+          lines.push(`- [${entry.timestamp.split('T')[0]}] ${entry.tag}`);
+        });
+      }
+      lines.push('');
+
+      const reportContent = lines.join('\n');
+
+      // Save report as memory entry with appropriate file_type
+      const entryId = await this._store.appendEntry({
+        file_type: reportFileType,
+        tag: `${reportFileType}:${timestamp.split('T')[0]}`,
+        content: reportContent,
+        timestamp: timestamp,
+        phase: phase
+      });
+
+      if (entryId) {
+        console.log(`[MemoryService] Saved ${phase} phase report as ${reportFileType} (ID: ${entryId})`);
+        return true;
+      }
+      return false;
+    } catch (err) {
+      console.error(`[MemoryService] Failed to generate ${phase} report:`, err);
+      return false;
+    }
+  }
+
+  /**
+   * Extract problem statement from context entries
+   */
+  private extractProblemStatement(contextEntries: StoreMemoryEntry[]): string {
+    if (contextEntries.length === 0) {
+      return 'No problem statement defined.';
+    }
+    
+    const latestContext = contextEntries[0];
+    const content = latestContext.content;
+    
+    // Try to extract first sentence or paragraph
+    const lines = content.split('\n').filter(l => l.trim());
+    if (lines.length > 0) {
+      return lines[0].slice(0, 200) + (lines[0].length > 200 ? '...' : '');
+    }
+    
+    return content.slice(0, 200) + (content.length > 200 ? '...' : '');
+  }
+
+  /**
+   * Save all phase reports as memory entries
+   */
+  async saveAllPhaseMemoryReports(): Promise<boolean> {
+    const results = await Promise.all([
+      this.generatePhaseMemoryReport('research'),
+      this.generatePhaseMemoryReport('planning'),
+      this.generatePhaseMemoryReport('execution')
+    ]);
+
+    return results.every(r => r === true);
+  }
+
+  /**
+   * Save all phase reports (research, plan, execution)
+   */
+  async saveAllPhaseReports(): Promise<boolean> {
+    const results = await Promise.all([
+      this.savePhaseReport('research'),
+      this.savePhaseReport('planning'),
+      this.savePhaseReport('execution')
+    ]);
+
+    return results.every(r => r === true);
+  }
+
+  private generatePhaseReport(phase: string, entries: StoreMemoryEntry[]): string {
+    const lines: string[] = [];
+    const phaseUpper = phase.charAt(0).toUpperCase() + phase.slice(1);
+
+    lines.push(`# ${phaseUpper} Report`);
+    lines.push('');
+    lines.push(`Generated: ${new Date().toISOString()}`);
+    lines.push(`Entries: ${entries.length}`);
+    lines.push('');
+    lines.push('---');
+    lines.push('');
+
+    // Group by file_type
+    const byType: Record<string, StoreMemoryEntry[]> = {};
+    entries.forEach(entry => {
+      if (!byType[entry.file_type]) {
+        byType[entry.file_type] = [];
+      }
+      byType[entry.file_type].push(entry);
+    });
+
+    // Sort entries by timestamp (newest first)
+    Object.keys(byType).forEach(type => {
+      byType[type].sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+    });
+
+    // Brief section
+    if (byType.BRIEF && byType.BRIEF.length > 0) {
+      lines.push(`## ${phaseUpper} Overview`);
+      lines.push('');
+      byType.BRIEF.forEach((entry, idx) => {
+        lines.push(`### ${entry.tag || `${phase} Brief ${idx + 1}`}`);
+        lines.push(`**Date:** ${entry.timestamp.split('T')[0]}`);
+        lines.push('');
+        lines.push(entry.content);
+        lines.push('');
+        lines.push('---');
+        lines.push('');
+      });
+    }
+
+    // Progress section
+    if (byType.PROGRESS && byType.PROGRESS.length > 0) {
+      lines.push(`## ${phaseUpper} Progress`);
+      lines.push('');
+      byType.PROGRESS.forEach((entry) => {
+        lines.push(`### ${entry.tag}`);
+        lines.push(`**Date:** ${entry.timestamp.split('T')[0]}`);
+        lines.push('');
+        lines.push(entry.content);
+        lines.push('');
+      });
+      lines.push('---');
+      lines.push('');
+    }
+
+    // Decision section
+    if (byType.DECISION && byType.DECISION.length > 0) {
+      lines.push(`## ${phaseUpper} Decisions`);
+      lines.push('');
+      byType.DECISION.forEach((entry) => {
+        lines.push(`### ${entry.tag}`);
+        lines.push(`**Date:** ${entry.timestamp.split('T')[0]}`);
+        lines.push('');
+        lines.push(entry.content);
+        lines.push('');
+      });
+      lines.push('---');
+      lines.push('');
+    }
+
+    // Context section
+    if (byType.CONTEXT && byType.CONTEXT.length > 0) {
+      lines.push(`## ${phaseUpper} Context`);
+      lines.push('');
+      byType.CONTEXT.forEach((entry) => {
+        lines.push(`### ${entry.tag}`);
+        lines.push(`**Date:** ${entry.timestamp.split('T')[0]}`);
+        lines.push('');
+        lines.push(entry.content);
+        lines.push('');
+      });
+      lines.push('---');
+      lines.push('');
+    }
+
+    // Pattern section
+    if (byType.PATTERN && byType.PATTERN.length > 0) {
+      lines.push(`## Patterns Discovered`);
+      lines.push('');
+      byType.PATTERN.forEach((entry) => {
+        lines.push(`### ${entry.tag}`);
+        lines.push(`**Date:** ${entry.timestamp.split('T')[0]}`);
+        lines.push('');
+        lines.push(entry.content);
+        lines.push('');
+      });
+    }
+
+    lines.push('---');
+    lines.push('*Report generated by AI-Memory Report System*');
+
+    return lines.join('\n');
+  }
+
+  /**
+   * Edit an existing memory entry (content, tag, or phase)
+   * Useful for corrections, additions, or refining earlier entries
+   * Example: Add research findings discovered during execution phase
+   */
+  async editEntry(
+    id: number,
+    updates: {
+      content?: string;
+      tag?: string;
+      phase?: 'research' | 'planning' | 'execution' | 'checkpoint';
+      progress_status?: 'done' | 'in-progress' | 'draft' | 'deprecated';
+    }
+  ): Promise<boolean> {
+    if (!this._state.active) {
+      console.error('[MemoryService] Cannot edit entry: memory bank not active');
+      return false;
+    }
+
+    try {
+      const success = await this._store.updateEntry(id, updates);
+      if (success) {
+        console.log(`[MemoryService] Edited entry ${id}:`, {
+          content: updates.content ? `${updates.content.slice(0, 50)}...` : undefined,
+          tag: updates.tag,
+          phase: updates.phase,
+          progress: updates.progress_status
+        });
+      }
+      return success;
+    } catch (err) {
+      console.error('[MemoryService] Edit entry failed:', err);
+      return false;
+    }
+  }
+
+  /**
+   * Append additional content to an existing entry
+   * Useful for adding discoveries or refinements without replacing original
+   * Example: "Found additional research on [date]: [new findings]"
+   */
+  async appendToEntry(id: number, additionalContent: string): Promise<boolean> {
+    if (!this._state.active) {
+      console.error('[MemoryService] Cannot append to entry: memory bank not active');
+      return false;
+    }
+
+    try {
+      // Retrieve the entry from any type
+      const decisionResult = await this._store.queryByType('DECISION', 1000);
+      let entry = decisionResult.entries.find((e: StoreMemoryEntry) => e.id === id);
+      
+      if (!entry) {
+        const contextResult = await this._store.queryByType('CONTEXT', 1000);
+        entry = contextResult.entries.find((e: StoreMemoryEntry) => e.id === id);
+      }
+      
+      if (!entry) {
+        const progressResult = await this._store.queryByType('PROGRESS', 1000);
+        entry = progressResult.entries.find((e: StoreMemoryEntry) => e.id === id);
+      }
+
+      if (!entry) {
+        console.error(`[MemoryService] Entry ${id} not found`);
+        return false;
+      }
+
+      // Append new content with timestamp marker
+      const timestamp = new Date().toISOString().split('T')[0];
+      const updatedContent = `${entry.content}\n\n---\n\n**[Updated ${timestamp}]** ${additionalContent}`;
+      
+      return this.editEntry(id, { content: updatedContent });
+    } catch (err) {
+      console.error('[MemoryService] Append to entry failed:', err);
+      return false;
     }
   }
 }

@@ -11,7 +11,10 @@ const FILE_TYPE_LABELS: Record<MemoryEntry['file_type'], string> = {
   DECISION: 'Decisions',
   PROGRESS: 'Progress',
   PATTERN: 'Patterns',
-  BRIEF: 'Brief'
+  BRIEF: 'Brief',
+  RESEARCH_REPORT: 'Research Report',
+  PLAN_REPORT: 'Plan Report',
+  EXECUTION_REPORT: 'Execution Report'
 };
 
 class DashboardTreeItem extends vscode.TreeItem {
@@ -198,7 +201,10 @@ export class MemoryDashboardTreeProvider implements vscode.TreeDataProvider<Dash
       { type: 'CONTEXT' as const, label: '📍 Context', icon: 'symbol-event' },
       { type: 'PROGRESS' as const, label: '✅ Progress', icon: 'checklist' },
       { type: 'PATTERN' as const, label: '🔗 Patterns', icon: 'symbol-structure' },
-      { type: 'BRIEF' as const, label: '📚 Brief', icon: 'book' }
+      { type: 'BRIEF' as const, label: '📚 Project Brief', icon: 'book' },
+      { type: 'RESEARCH_REPORT' as const, label: '🔍 Research Reports', icon: 'telescope' },
+      { type: 'PLAN_REPORT' as const, label: '📐 Plan Reports', icon: 'whiteboard' },
+      { type: 'EXECUTION_REPORT' as const, label: '⚙️ Execution Reports', icon: 'wrench' }
     ];
 
     for (const file of memoryFiles) {

@@ -21,7 +21,7 @@ const KEYWORD_MAPPINGS: Record<string, string[]> = {
   checkpoint: ['checkpoint', 'save checkpoint', 'create checkpoint', 'mark checkpoint'],
   execute: ['execute', 'implement', 'run', 'deploy', 'build', 'start'],
   plan: ['plan', 'planning', 'think', 'design', 'architect', 'strategy'],
-  sync: ['sync', 'synchronize', 'update', 'refresh', 'reconcile'],
+  sync: ['sync', 'synchronize', 'refresh', 'reconcile'],
   commit: ['commit', 'push', 'save', 'persist', 'store'],
   update: ['update', 'modify', 'change', 'edit', 'alter'],
 };
@@ -31,6 +31,8 @@ const KEYWORD_MAPPINGS: Record<string, string[]> = {
  * Returns the most confident match if found, including concise summary
  */
 export function detectKeyword(userInput: string): DetectedKeyword | null {
+  if (!userInput || typeof userInput !== 'string') return null;
+  
   const lowerInput = userInput.toLowerCase();
 
   // Check each mapping for matches

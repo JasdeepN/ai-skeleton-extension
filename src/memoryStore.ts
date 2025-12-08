@@ -5,10 +5,11 @@
 
 import * as path from 'path';
 import * as fs from 'fs';
+import { getEmbeddingService, quantizeEmbedding } from './embeddingService';
 
 export interface MemoryEntry {
   id?: number;
-  file_type: 'CONTEXT' | 'DECISION' | 'PROGRESS' | 'PATTERN' | 'BRIEF';
+  file_type: 'CONTEXT' | 'DECISION' | 'PROGRESS' | 'PATTERN' | 'BRIEF' | 'RESEARCH_REPORT' | 'PLAN_REPORT' | 'EXECUTION_REPORT';
   timestamp: string; // ISO 8601
   tag: string; // e.g., "CONTEXT:2025-12-04"
   content: string;
@@ -45,7 +46,10 @@ export const FILE_TYPE_TO_DISPLAY: Record<MemoryEntry['file_type'], string> = {
   DECISION: 'Decision Log',
   PROGRESS: 'Progress',
   PATTERN: 'System Patterns',
-  BRIEF: 'Project Brief'
+  BRIEF: 'Project Brief',
+  RESEARCH_REPORT: 'Research Report',
+  PLAN_REPORT: 'Plan Report',
+  EXECUTION_REPORT: 'Execution Report'
 };
 
 // Reverse mapping from various inputs to uppercase tags (for backward compat)
@@ -63,7 +67,16 @@ export const INPUT_TO_FILE_TYPE: Record<string, MemoryEntry['file_type']> = {
   'PATTERN': 'PATTERN',
   'projectBrief': 'BRIEF',
   'brief': 'BRIEF',
-  'BRIEF': 'BRIEF'
+  'BRIEF': 'BRIEF',
+  'researchReport': 'RESEARCH_REPORT',
+  'research_report': 'RESEARCH_REPORT',
+  'RESEARCH_REPORT': 'RESEARCH_REPORT',
+  'planReport': 'PLAN_REPORT',
+  'plan_report': 'PLAN_REPORT',
+  'PLAN_REPORT': 'PLAN_REPORT',
+  'executionReport': 'EXECUTION_REPORT',
+  'execution_report': 'EXECUTION_REPORT',
+  'EXECUTION_REPORT': 'EXECUTION_REPORT'
 };
 
 export interface QueryResult {
@@ -80,12 +93,19 @@ type DatabaseBackend = 'better-sqlite3' | 'sql.js' | 'none';
  * Optional: better-sqlite3 (native) - faster performance
  */
 export class MemoryStore {
-  private backend: DatabaseBackend = 'none';
+  private _backend: DatabaseBackend = 'none';
   private db: any = null;
   private isInitialized = false;
   private dbPath: string = '';
   private querySamples: number[] = [];
   private readonly maxSamples = 50;
+
+  /**
+   * Get current database backend
+   */
+  get backend(): DatabaseBackend {
+    return this._backend;
+  }
 
   /**
    * Initialize database connection
@@ -109,7 +129,7 @@ export class MemoryStore {
       console.log('[MemoryStore] Reinitializing - path changed:', this.dbPath !== dbPath, 'file deleted:', !fileExists);
       this.isInitialized = false;
       this.db = null;
-      this.backend = 'none';
+      this._backend = 'none';
     }
 
     this.dbPath = dbPath;
@@ -218,7 +238,7 @@ export class MemoryStore {
         }
         
         this.db = new SQL.Database(fileBuffer);
-        this.backend = 'sql.js';
+        this._backend = 'sql.js';
         this.initializeSchema();
         this.isInitialized = true;
         
@@ -259,14 +279,14 @@ export class MemoryStore {
         }
 
         this.db = new Database(dbPath);
-        this.backend = 'better-sqlite3';
+        this._backend = 'better-sqlite3';
         this.initializeSchema();
         this.isInitialized = true;
         console.log('[MemoryStore] Using better-sqlite3 (native) backend - SUCCESS');
         return true;
       } catch (fallbackErr) {
         console.error('[MemoryStore] Both backends failed:', fallbackErr);
-        this.backend = 'none';
+        this._backend = 'none';
         return false;
       }
     }
@@ -279,12 +299,12 @@ export class MemoryStore {
     if (!this.db) return;
 
     try {
-      if (this.backend === 'better-sqlite3') {
+      if (this._backend === 'better-sqlite3') {
         // better-sqlite3 uses exec() for multiple statements
         this.db.exec(`
           CREATE TABLE IF NOT EXISTS entries (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            file_type TEXT NOT NULL CHECK(file_type IN ('CONTEXT', 'DECISION', 'PROGRESS', 'PATTERN', 'BRIEF')),
+            file_type TEXT NOT NULL CHECK(file_type IN ('CONTEXT', 'DECISION', 'PROGRESS', 'PATTERN', 'BRIEF', 'RESEARCH_REPORT', 'PLAN_REPORT', 'EXECUTION_REPORT')),
             timestamp TEXT NOT NULL,
             tag TEXT NOT NULL,
             content TEXT NOT NULL,
@@ -327,12 +347,12 @@ export class MemoryStore {
           CREATE INDEX IF NOT EXISTS idx_query_timestamp 
             ON query_metrics(timestamp DESC);
         `);
-      } else if (this.backend === 'sql.js') {
+      } else if (this._backend === 'sql.js') {
         // sql.js uses run() for each statement
         const statements = [
           `CREATE TABLE IF NOT EXISTS entries (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            file_type TEXT NOT NULL CHECK(file_type IN ('CONTEXT', 'DECISION', 'PROGRESS', 'PATTERN', 'BRIEF')),
+            file_type TEXT NOT NULL CHECK(file_type IN ('CONTEXT', 'DECISION', 'PROGRESS', 'PATTERN', 'BRIEF', 'RESEARCH_REPORT', 'PLAN_REPORT', 'EXECUTION_REPORT')),
             timestamp TEXT NOT NULL,
             tag TEXT NOT NULL,
             content TEXT NOT NULL,
@@ -393,7 +413,7 @@ export class MemoryStore {
     if (!this.db || !this.isInitialized) return;
 
     try {
-      if (this.backend === 'better-sqlite3') {
+      if (this._backend === 'better-sqlite3') {
         // Check existing columns
         const tableInfo = this.db.prepare('PRAGMA table_info(entries)').all() as Array<{name: string}>;
         const columnNames = new Set(tableInfo.map(col => col.name));
@@ -428,7 +448,17 @@ export class MemoryStore {
           }
         }
         
-        // Migration 4: Add operation column to token_metrics if it doesn't exist
+        // Migration 4: Add embedding column if missing
+        if (!columnNames.has('embedding')) {
+          console.log('[MemoryStore] Running migration: Adding embedding column to entries');
+          try {
+            this.db.prepare('ALTER TABLE entries ADD COLUMN embedding BLOB DEFAULT NULL').run();
+          } catch (e) {
+            console.warn('[MemoryStore] embedding column already exists or migration failed:', e);
+          }
+        }
+
+        // Migration 5: Add operation column to token_metrics if it doesn't exist
         const tokenMetricsInfo = this.db.prepare('PRAGMA table_info(token_metrics)').all() as Array<{name: string}>;
         const hasOperation = tokenMetricsInfo.some(col => col.name === 'operation');
         
@@ -440,7 +470,52 @@ export class MemoryStore {
             console.warn('[MemoryStore] operation column already exists:', e);
           }
         }
-      } else if (this.backend === 'sql.js') {
+
+        // Migration 6: Update CHECK constraint to include report types
+        try {
+          const schemaResult = this.db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='entries'").get() as {sql: string} | undefined;
+          if (schemaResult && !schemaResult.sql.includes('RESEARCH_REPORT')) {
+            console.log('[MemoryStore] Running migration: Updating CHECK constraint to include report types');
+            
+            // Begin transaction
+            this.db.prepare('BEGIN TRANSACTION').run();
+            
+            try {
+              // Recreate table with updated CHECK constraint
+              this.db.prepare(`
+                CREATE TABLE entries_new (
+                  id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  file_type TEXT NOT NULL CHECK(file_type IN ('CONTEXT', 'DECISION', 'PROGRESS', 'PATTERN', 'BRIEF', 'RESEARCH_REPORT', 'PLAN_REPORT', 'EXECUTION_REPORT')),
+                  timestamp TEXT NOT NULL,
+                  tag TEXT NOT NULL,
+                  content TEXT NOT NULL,
+                  metadata TEXT DEFAULT '{}',
+                  phase TEXT DEFAULT NULL,
+                  progress_status TEXT DEFAULT NULL,
+                  embedding BLOB DEFAULT NULL
+                )
+              `).run();
+              
+              // Copy all data
+              this.db.prepare('INSERT INTO entries_new SELECT * FROM entries').run();
+              
+              // Drop old table
+              this.db.prepare('DROP TABLE entries').run();
+              
+              // Rename new table
+              this.db.prepare('ALTER TABLE entries_new RENAME TO entries').run();
+              
+              this.db.prepare('COMMIT').run();
+              console.log('[MemoryStore] Successfully migrated CHECK constraint');
+            } catch (e) {
+              this.db.prepare('ROLLBACK').run();
+              throw e;
+            }
+          }
+        } catch (e) {
+          console.warn('[MemoryStore] CHECK constraint migration failed:', e);
+        }
+      } else if (this._backend === 'sql.js') {
         // Check existing columns
         const tableInfo = this.db.exec('PRAGMA table_info(entries)');
         const columnNames = new Set<string>();
@@ -501,6 +576,83 @@ export class MemoryStore {
             console.warn('[MemoryStore] operation column migration failed:', e);
           }
         }
+
+        // Migration 5: Add embedding column if missing
+        if (!columnNames.has('embedding')) {
+          console.log('[MemoryStore] Running migration: Adding embedding column to entries');
+          try {
+            this.db.run('ALTER TABLE entries ADD COLUMN embedding BLOB DEFAULT NULL');
+            this.persistSqlJs();
+          } catch (e) {
+            console.warn('[MemoryStore] embedding column migration failed:', e);
+          }
+        }
+
+        // Migration 6: Update CHECK constraint to include report types
+        try {
+          console.log('[MemoryStore] Checking if Migration 6 (CHECK constraint) is needed...');
+          
+          // Check if CHECK constraint includes RESEARCH_REPORT
+          const schemaResult = this.db.exec("SELECT sql FROM sqlite_master WHERE type='table' AND name='entries'");
+          if (schemaResult.length > 0 && schemaResult[0].values.length > 0) {
+            const schemaSql = schemaResult[0].values[0][0] as string;
+            console.log('[MemoryStore] Current schema includes RESEARCH_REPORT:', schemaSql.includes('RESEARCH_REPORT'));
+            
+            if (!schemaSql.includes('RESEARCH_REPORT')) {
+              console.log('[MemoryStore] ⚠️  Running migration: Updating CHECK constraint to include report types');
+              
+              // Count entries before
+              const countBefore = this.db.exec('SELECT COUNT(*) FROM entries');
+              const entriesBefore = countBefore[0].values[0][0];
+              console.log('[MemoryStore] Entries before migration:', entriesBefore);
+              
+              // Recreate table with updated CHECK constraint
+              this.db.run(`
+                CREATE TABLE entries_new (
+                  id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  file_type TEXT NOT NULL CHECK(file_type IN ('CONTEXT', 'DECISION', 'PROGRESS', 'PATTERN', 'BRIEF', 'RESEARCH_REPORT', 'PLAN_REPORT', 'EXECUTION_REPORT')),
+                  timestamp TEXT NOT NULL,
+                  tag TEXT NOT NULL,
+                  content TEXT NOT NULL,
+                  metadata TEXT DEFAULT '{}',
+                  phase TEXT DEFAULT NULL,
+                  progress_status TEXT DEFAULT NULL,
+                  embedding BLOB DEFAULT NULL
+                )
+              `);
+              
+              // Copy all data
+              this.db.run('INSERT INTO entries_new SELECT * FROM entries');
+              
+              // Verify
+              const countAfter = this.db.exec('SELECT COUNT(*) FROM entries_new');
+              const entriesAfter = countAfter[0].values[0][0];
+              console.log('[MemoryStore] Entries after copy:', entriesAfter);
+              
+              if (entriesBefore !== entriesAfter) {
+                throw new Error(`Migration data loss! Before: ${entriesBefore}, After: ${entriesAfter}`);
+              }
+              
+              // Drop old table
+              this.db.run('DROP TABLE entries');
+              
+              // Rename new table
+              this.db.run('ALTER TABLE entries_new RENAME TO entries');
+              
+              this.persistSqlJs();
+              console.log('[MemoryStore] ✅ Successfully migrated CHECK constraint - all', entriesAfter, 'entries preserved');
+            } else {
+              console.log('[MemoryStore] ✓ Migration 6 not needed - schema already up to date');
+            }
+          }
+        } catch (e) {
+          console.error('[MemoryStore] ❌ CHECK constraint migration failed:', e);
+          console.error('[MemoryStore] Migration error details:', {
+            name: (e as any)?.name,
+            message: (e as any)?.message,
+            stack: (e as any)?.stack?.split('\n').slice(0, 3).join('\n')
+          });
+        }
       }
     } catch (err) {
       console.error('[MemoryStore] Migration failed:', err);
@@ -509,12 +661,22 @@ export class MemoryStore {
 
   /**
    * Append a new entry to the database
+   * Automatically generates and stores embedding for semantic search
    */
   async appendEntry(entry: Omit<MemoryEntry, 'id'>): Promise<number | null> {
-    if (!this.db || !this.isInitialized) return null;
+    console.log('[MemoryStore] appendEntry called for file_type:', entry.file_type);
+    console.log('[MemoryStore] DB state - db:', !!this.db, 'isInitialized:', this.isInitialized, 'backend:', this._backend);
+    
+    if (!this.db || !this.isInitialized) {
+      console.error('[MemoryStore] appendEntry FAILED: db or isInitialized check failed');
+      return null;
+    }
+
+    let insertedId: number | null = null;
 
     try {
-      if (this.backend === 'better-sqlite3') {
+      // Step 1: Insert entry without embedding first
+      if (this._backend === 'better-sqlite3') {
         const stmt = this.db.prepare(`
           INSERT INTO entries (file_type, timestamp, tag, content, metadata, phase, progress_status)
           VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -528,21 +690,180 @@ export class MemoryStore {
           entry.phase ?? null,
           entry.progress_status ?? null
         );
-        return result.lastInsertRowid as number;
-      } else if (this.backend === 'sql.js') {
+        insertedId = result.lastInsertRowid as number;
+      } else if (this._backend === 'sql.js') {
+        console.log('[MemoryStore] Using sql.js backend, inserting entry...');
         this.db.run(
           `INSERT INTO entries (file_type, timestamp, tag, content, metadata, phase, progress_status)
            VALUES (?, ?, ?, ?, ?, ?, ?)`,
           [entry.file_type, entry.timestamp, entry.tag, entry.content, entry.metadata ?? '{}', entry.phase ?? null, entry.progress_status ?? null]
         );
+        
+        // Retrieve the inserted row ID - use multiple strategies to ensure we get it
+        try {
+          // Strategy 1: Try last_insert_rowid()
+          let result = this.db.exec('SELECT last_insert_rowid() as id');
+          if (result && result[0] && result[0].values && result[0].values[0]) {
+            insertedId = Number(result[0].values[0][0]);
+            console.log('[MemoryStore] Insert successful via last_insert_rowid(), ID:', insertedId);
+          } else {
+            // Strategy 2: Query the max ID from the table (fallback)
+            console.log('[MemoryStore] last_insert_rowid() returned empty, trying max(id)...');
+            result = this.db.exec('SELECT MAX(id) as id FROM entries');
+            if (result && result[0] && result[0].values && result[0].values[0]) {
+              const maxId = result[0].values[0][0];
+              if (maxId !== null) {
+                insertedId = Number(maxId);
+                console.log('[MemoryStore] Insert successful via MAX(id), ID:', insertedId);
+              }
+            }
+          }
+        } catch (idErr) {
+          console.warn('[MemoryStore] Could not retrieve inserted ID:', idErr);
+        }
+        
+        if (!insertedId) {
+          console.error('[MemoryStore] CRITICAL: Could not determine inserted ID after INSERT. Entry was added but ID is unknown.');
+        }
+        
         this.persistSqlJs();
-        // sql.js doesn't easily return lastInsertRowid
-        return Math.floor(Date.now() / 1000);
       }
+
+      // Step 2: Generate and update embedding asynchronously (non-blocking)
+      if (insertedId) {
+        // Fire and forget - don't block the main insert operation
+        this.generateAndUpdateEmbedding(insertedId, entry.content).catch(err => {
+          console.warn(`[MemoryStore] Failed to generate embedding for entry ${insertedId}:`, err);
+        });
+      } else {
+        console.error('[MemoryStore] insertedId is null after insert attempt');
+      }
+
+      return insertedId;
     } catch (err) {
       console.error('[MemoryStore] Append failed:', err);
     }
     return null;
+  }
+
+  /**
+   * Generate embedding for content and update entry in database
+   * Called asynchronously after entry insert
+   */
+  private async generateAndUpdateEmbedding(entryId: number, content: string): Promise<void> {
+    if (!this.db || !this.isInitialized) return;
+
+    try {
+      // Generate embedding using EmbeddingService
+      const embeddingService = getEmbeddingService();
+      const result = await embeddingService.embed(content);
+      
+      // Quantize to binary (384 dims -> 48 bytes)
+      const quantized = quantizeEmbedding(result.embedding);
+      
+      // Convert to Buffer for SQLite BLOB storage
+      const buffer = Buffer.from(quantized);
+
+      // Update the entry with the embedding
+      if (this._backend === 'better-sqlite3') {
+        const stmt = this.db.prepare(`
+          UPDATE entries 
+          SET embedding = ?
+          WHERE id = ?
+        `);
+        stmt.run(buffer, entryId);
+      } else if (this._backend === 'sql.js') {
+        this.db.run(
+          `UPDATE entries SET embedding = ? WHERE id = ?`,
+          [buffer, entryId]
+        );
+        this.persistSqlJs();
+      }
+
+      console.log(`[MemoryStore] Generated embedding for entry ${entryId} (${quantized.length} bytes)`);
+    } catch (err: any) {
+      // Don't throw - this is async/background operation
+      console.error(`[MemoryStore] Embedding generation failed for entry ${entryId}:`, err.message || err);
+    }
+  }
+
+  /**
+   * Update an existing entry (content, tag, or phase)
+   * Regenerates embedding for semantic search consistency
+   */
+  async updateEntry(
+    id: number,
+    updates: Partial<Omit<MemoryEntry, 'id' | 'timestamp'>>
+  ): Promise<boolean> {
+    if (!this.db || !this.isInitialized) return false;
+
+    try {
+      const setClauses: string[] = [];
+      const values: any[] = [];
+
+      // Build dynamic UPDATE statement
+      if (updates.content !== undefined) {
+        setClauses.push('content = ?');
+        values.push(updates.content);
+      }
+      if (updates.tag !== undefined) {
+        setClauses.push('tag = ?');
+        values.push(updates.tag);
+      }
+      if (updates.phase !== undefined) {
+        setClauses.push('phase = ?');
+        values.push(updates.phase);
+      }
+      if (updates.progress_status !== undefined) {
+        setClauses.push('progress_status = ?');
+        values.push(updates.progress_status);
+      }
+      if (updates.metadata !== undefined) {
+        setClauses.push('metadata = ?');
+        values.push(updates.metadata);
+      }
+
+      if (setClauses.length === 0) {
+        return false; // Nothing to update
+      }
+
+      values.push(id); // Add id for WHERE clause
+
+      if (this._backend === 'better-sqlite3') {
+        const stmt = this.db.prepare(`
+          UPDATE entries
+          SET ${setClauses.join(', ')}
+          WHERE id = ?
+        `);
+        const result = stmt.run(...values);
+        const updated = result.changes > 0;
+        
+        // Regenerate embedding if content changed
+        if (updated && updates.content) {
+          this.generateAndUpdateEmbedding(id, updates.content).catch(err => {
+            console.warn(`[MemoryStore] Failed to regenerate embedding for entry ${id}:`, err);
+          });
+        }
+        return updated;
+      } else if (this._backend === 'sql.js') {
+        this.db.run(
+          `UPDATE entries SET ${setClauses.join(', ')} WHERE id = ?`,
+          values
+        );
+        this.persistSqlJs();
+        
+        // Regenerate embedding if content changed
+        if (updates.content) {
+          this.generateAndUpdateEmbedding(id, updates.content).catch(err => {
+            console.warn(`[MemoryStore] Failed to regenerate embedding for entry ${id}:`, err);
+          });
+        }
+        return true;
+      }
+    } catch (err) {
+      console.error('[MemoryStore] Update entry failed:', err);
+    }
+    return false;
   }
 
   /**
@@ -557,7 +878,7 @@ export class MemoryStore {
     }
 
     try {
-      if (this.backend === 'better-sqlite3') {
+      if (this._backend === 'better-sqlite3') {
         const stmt = this.db.prepare(`
           SELECT id, file_type, timestamp, tag, content, metadata, phase, progress_status
           FROM entries
@@ -567,7 +888,7 @@ export class MemoryStore {
         `);
         const entries = stmt.all(fileType, limit) as MemoryEntry[];
         return { entries, count: entries.length };
-      } else if (this.backend === 'sql.js') {
+      } else if (this._backend === 'sql.js') {
         const stmt = this.db.prepare(`
           SELECT id, file_type, timestamp, tag, content, metadata, phase, progress_status
           FROM entries
@@ -604,7 +925,7 @@ export class MemoryStore {
     }
 
     try {
-      if (this.backend === 'better-sqlite3') {
+      if (this._backend === 'better-sqlite3') {
         const stmt = this.db.prepare(`
           SELECT id, file_type, timestamp, tag, content, metadata, phase, progress_status
           FROM entries
@@ -613,7 +934,7 @@ export class MemoryStore {
         `);
         const entries = stmt.all(fileType, startDate, endDate) as MemoryEntry[];
         return { entries, count: entries.length };
-      } else if (this.backend === 'sql.js') {
+      } else if (this._backend === 'sql.js') {
         const stmt = this.db.prepare(`
           SELECT id, file_type, timestamp, tag, content, metadata, phase, progress_status
           FROM entries
@@ -637,6 +958,52 @@ export class MemoryStore {
   }
 
   /**
+   * Query entries by phase (research|planning|execution|checkpoint)
+   */
+  async queryByPhase(
+    phase: 'research' | 'planning' | 'execution' | 'checkpoint',
+    limit: number = 500
+  ): Promise<MemoryEntry[]> {
+    if (!this.db || !this.isInitialized) {
+      return [];
+    }
+
+    try {
+      if (this._backend === 'better-sqlite3') {
+        const stmt = this.db.prepare(`
+          SELECT id, file_type, timestamp, tag, content, metadata, phase, progress_status
+          FROM entries
+          WHERE phase = ?
+          ORDER BY timestamp DESC
+          LIMIT ?
+        `);
+        const entries = stmt.all(phase, limit) as MemoryEntry[];
+        return entries;
+      } else if (this._backend === 'sql.js') {
+        const stmt = this.db.prepare(`
+          SELECT id, file_type, timestamp, tag, content, metadata, phase, progress_status
+          FROM entries
+          WHERE phase = ?
+          ORDER BY timestamp DESC
+          LIMIT ?
+        `);
+        stmt.bind([phase, limit]);
+        const entries: MemoryEntry[] = [];
+        while (stmt.step()) {
+          entries.push(stmt.getAsObject() as MemoryEntry);
+        }
+        stmt.free();
+        return entries;
+      }
+    } catch (err) {
+      console.error('[MemoryStore] Query by phase failed:', err);
+      return [];
+    }
+
+    return [];
+  }
+
+  /**
    * Full-text search
    */
   async fullTextSearch(query: string, limit: number = 50): Promise<QueryResult> {
@@ -645,7 +1012,7 @@ export class MemoryStore {
     }
 
     try {
-      if (this.backend === 'better-sqlite3') {
+      if (this._backend === 'better-sqlite3') {
         const stmt = this.db.prepare(`
           SELECT id, file_type, timestamp, tag, content, metadata, phase, progress_status
           FROM entries
@@ -655,7 +1022,7 @@ export class MemoryStore {
         `);
         const entries = stmt.all(`%${query}%`, limit) as MemoryEntry[];
         return { entries, count: entries.length };
-      } else if (this.backend === 'sql.js') {
+      } else if (this._backend === 'sql.js') {
         const stmt = this.db.prepare(`
           SELECT id, file_type, timestamp, tag, content, metadata, phase, progress_status
           FROM entries
@@ -694,13 +1061,13 @@ export class MemoryStore {
    * Close database connection
    */
   close() {
-    if (this.backend === 'better-sqlite3' && this.db) {
+    if (this._backend === 'better-sqlite3' && this.db) {
       try {
         this.db.close();
       } catch (err) {
         console.error('[MemoryStore] Close failed:', err);
       }
-    } else if (this.backend === 'sql.js') {
+    } else if (this._backend === 'sql.js') {
       try {
         this.persistSqlJs();
       } catch (err) {
@@ -715,7 +1082,7 @@ export class MemoryStore {
    * Persist sql.js data to disk (sql.js is in-memory)
    */
   private persistSqlJs() {
-    if (this.backend !== 'sql.js' || !this.db || !this.dbPath) return;
+    if (this._backend !== 'sql.js' || !this.db || !this.dbPath) return;
 
     try {
       const data = this.db.export();
@@ -739,7 +1106,7 @@ export class MemoryStore {
    * Get current backend
    */
   getBackend(): DatabaseBackend {
-    return this.backend;
+    return this._backend;
   }
 
   /**
@@ -756,7 +1123,7 @@ export class MemoryStore {
     if (!this.db || !this.isInitialized) return null;
 
     try {
-      if (this.backend === 'better-sqlite3') {
+      if (this._backend === 'better-sqlite3') {
         const stmt = this.db.prepare(`
           INSERT INTO token_metrics (timestamp, model, input_tokens, output_tokens, total_tokens, operation, context_status)
           VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -771,7 +1138,7 @@ export class MemoryStore {
           metric.context_status || null
         );
         return result.lastInsertRowid as number;
-      } else if (this.backend === 'sql.js') {
+      } else if (this._backend === 'sql.js') {
         this.db.run(
           `INSERT INTO token_metrics (timestamp, model, input_tokens, output_tokens, total_tokens, operation, context_status)
            VALUES (?, ?, ?, ?, ?, ?, ?)`,
@@ -793,7 +1160,7 @@ export class MemoryStore {
     if (!this.db || !this.isInitialized) return [];
 
     try {
-      if (this.backend === 'better-sqlite3') {
+      if (this._backend === 'better-sqlite3') {
         const stmt = this.db.prepare(`
           SELECT id, timestamp, model, input_tokens, output_tokens, total_tokens, context_status, created_at
           FROM token_metrics
@@ -801,7 +1168,7 @@ export class MemoryStore {
           LIMIT ?
         `);
         return stmt.all(limit) as TokenMetric[];
-      } else if (this.backend === 'sql.js') {
+      } else if (this._backend === 'sql.js') {
         const stmt = this.db.prepare(`
           SELECT id, timestamp, model, input_tokens, output_tokens, total_tokens, context_status, created_at
           FROM token_metrics
@@ -831,7 +1198,7 @@ export class MemoryStore {
     try {
       const startDate = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
 
-      if (this.backend === 'better-sqlite3') {
+      if (this._backend === 'better-sqlite3') {
         const stmt = this.db.prepare(`
           SELECT id, timestamp, model, input_tokens, output_tokens, total_tokens, context_status, created_at
           FROM token_metrics
@@ -839,7 +1206,7 @@ export class MemoryStore {
           ORDER BY timestamp DESC
         `);
         return stmt.all(startDate) as TokenMetric[];
-      } else if (this.backend === 'sql.js') {
+      } else if (this._backend === 'sql.js') {
         const stmt = this.db.prepare(`
           SELECT id, timestamp, model, input_tokens, output_tokens, total_tokens, context_status, created_at
           FROM token_metrics
@@ -869,7 +1236,7 @@ export class MemoryStore {
     try {
       const startDate = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
 
-      if (this.backend === 'better-sqlite3') {
+      if (this._backend === 'better-sqlite3') {
         const stmt = this.db.prepare(`
           SELECT id, timestamp, operation, elapsed_ms, result_count, created_at
           FROM query_metrics
@@ -877,7 +1244,7 @@ export class MemoryStore {
           ORDER BY timestamp DESC
         `);
         return stmt.all(operation, startDate) as QueryMetric[];
-      } else if (this.backend === 'sql.js') {
+      } else if (this._backend === 'sql.js') {
         const stmt = this.db.prepare(`
           SELECT id, timestamp, operation, elapsed_ms, result_count, created_at
           FROM query_metrics
@@ -906,7 +1273,7 @@ export class MemoryStore {
 
     try {
       if (metricType === 'token_metrics') {
-        if (this.backend === 'better-sqlite3') {
+        if (this._backend === 'better-sqlite3') {
           const stmt = this.db.prepare(`
             SELECT id, timestamp, model, input_tokens, output_tokens, total_tokens, context_status, created_at
             FROM token_metrics
@@ -915,7 +1282,7 @@ export class MemoryStore {
           `);
           const result = stmt.get() as TokenMetric | undefined;
           return result || null;
-        } else if (this.backend === 'sql.js') {
+        } else if (this._backend === 'sql.js') {
           const stmt = this.db.prepare(`
             SELECT id, timestamp, model, input_tokens, output_tokens, total_tokens, context_status, created_at
             FROM token_metrics
@@ -931,7 +1298,7 @@ export class MemoryStore {
           return null;
         }
       } else if (metricType === 'query_metrics') {
-        if (this.backend === 'better-sqlite3') {
+        if (this._backend === 'better-sqlite3') {
           const stmt = this.db.prepare(`
             SELECT id, timestamp, operation, elapsed_ms, result_count, created_at
             FROM query_metrics
@@ -940,7 +1307,7 @@ export class MemoryStore {
           `);
           const result = stmt.get() as QueryMetric | undefined;
           return result || null;
-        } else if (this.backend === 'sql.js') {
+        } else if (this._backend === 'sql.js') {
           const stmt = this.db.prepare(`
             SELECT id, timestamp, operation, elapsed_ms, result_count, created_at
             FROM query_metrics
@@ -971,13 +1338,16 @@ export class MemoryStore {
       DECISION: 0,
       PROGRESS: 0,
       PATTERN: 0,
-      BRIEF: 0
+      BRIEF: 0,
+      RESEARCH_REPORT: 0,
+      PLAN_REPORT: 0,
+      EXECUTION_REPORT: 0
     };
 
     if (!this.db || !this.isInitialized) return counts;
 
     try {
-      if (this.backend === 'better-sqlite3') {
+      if (this._backend === 'better-sqlite3') {
         const stmt = this.db.prepare(`
           SELECT file_type, COUNT(*) as count
           FROM entries
@@ -988,7 +1358,7 @@ export class MemoryStore {
           counts[row.file_type] = row.count;
         }
         return counts;
-      } else if (this.backend === 'sql.js') {
+      } else if (this._backend === 'sql.js') {
         const stmt = this.db.prepare(`
           SELECT file_type, COUNT(*) as count
           FROM entries
@@ -1021,7 +1391,7 @@ export class MemoryStore {
     if (!this.db || !this.isInitialized) return 0;
 
     try {
-      if (this.backend === 'better-sqlite3') {
+      if (this._backend === 'better-sqlite3') {
         const stmt = this.db.prepare(`
           SELECT COUNT(*) as count
           FROM entries
@@ -1029,7 +1399,7 @@ export class MemoryStore {
         `);
         const result = stmt.get() as { count: number };
         return result.count;
-      } else if (this.backend === 'sql.js') {
+      } else if (this._backend === 'sql.js') {
         const stmt = this.db.prepare(`
           SELECT COUNT(*) as count
           FROM entries
@@ -1047,6 +1417,53 @@ export class MemoryStore {
       console.error('[MemoryStore] Count entries with embeddings failed:', err);
     }
     return 0;
+  }
+
+  /**
+   * Query all entries that have embeddings
+   * Returns entries with embedding data for semantic similarity calculations
+   */
+  async queryEntriesWithEmbeddings(limit: number = 1000): Promise<Array<MemoryEntry & { embedding: Buffer }>> {
+    if (!this.db || !this.isInitialized) return [];
+
+    try {
+      if (this._backend === 'better-sqlite3') {
+        const stmt = this.db.prepare(`
+          SELECT id, file_type, timestamp, tag, content, metadata, phase, progress_status, embedding
+          FROM entries
+          WHERE embedding IS NOT NULL
+          ORDER BY timestamp DESC
+          LIMIT ?
+        `);
+        const rows = stmt.all(limit) as any[];
+        return rows.map(row => ({
+          ...row,
+          embedding: row.embedding ? Buffer.from(row.embedding) : Buffer.alloc(0)
+        }));
+      } else if (this._backend === 'sql.js') {
+        const stmt = this.db.prepare(`
+          SELECT id, file_type, timestamp, tag, content, metadata, phase, progress_status, embedding
+          FROM entries
+          WHERE embedding IS NOT NULL
+          ORDER BY timestamp DESC
+          LIMIT ?
+        `);
+        stmt.bind([limit]);
+        const entries: Array<MemoryEntry & { embedding: Buffer }> = [];
+        while (stmt.step()) {
+          const obj = stmt.getAsObject() as any;
+          entries.push({
+            ...obj,
+            embedding: obj.embedding ? Buffer.from(new Uint8Array(obj.embedding)) : Buffer.alloc(0)
+          });
+        }
+        stmt.free();
+        return entries;
+      }
+    } catch (err) {
+      console.error('[MemoryStore] Query entries with embeddings failed:', err);
+    }
+    return [];
   }
 
   /**

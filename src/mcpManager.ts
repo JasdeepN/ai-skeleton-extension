@@ -109,15 +109,24 @@ export async function maybeAutoStartMCPs(context: vscode.ExtensionContext): Prom
   const key = `aiSkeleton.mcp.autoStart.confirmed:${ws}`;
   const confirmed = context.globalState.get<boolean>(key, false);
   if (!confirmed) {
-    const action = await vscode.window.showInformationMessage('Start configured MCP servers on startup?', 'Start Now', 'Always', 'Not Now');
-    if (action === 'Always') {
+    const action = await vscode.window.showInformationMessage(
+      'Start configured MCP servers on startup?',
+      { title: 'Start Now' },
+      { title: "Don't Ask Again", isCloseAffordance: false },
+      { title: 'Cancel', isCloseAffordance: true }
+    );
+    
+    if (action?.title === 'Start Now') {
+      await startMCPServers(context);
+    } else if (action?.title === "Don't Ask Again") {
+      // Store preference and auto-start in the future
       await context.globalState.update(key, true);
       await startMCPServers(context);
-    } else if (action === 'Start Now') {
-      await startMCPServers(context);
     }
+    // Cancel does nothing, just returns
     return;
   }
 
+  // User previously selected "Don't Ask Again", so auto-start now
   await startMCPServers(context);
 }

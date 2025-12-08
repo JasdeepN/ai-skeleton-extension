@@ -15,6 +15,7 @@ import { showSetupDialog, checkForUpdates, reinstallAll } from './setupService';
 import { TokenCounterService } from './tokenCounterService';
 import { getMetricsService } from './metricsService';
 import { createChatParticipant } from './chatParticipant';
+import { logger } from './logger';
 
 async function resolvePrompts(): Promise<Prompt[]> {
   const source = vscode.workspace.getConfiguration().get<'auto'|'embedded'|'workspace'>('aiSkeleton.prompts.source', 'auto');
@@ -41,31 +42,79 @@ export async function activate(context: vscode.ExtensionContext) {
   // Show unified setup dialog if components are missing (only on first time)
   // Skip in test environments to avoid dialog errors
   if (!isTestEnvironment) {
-    await showSetupDialog(context);
+    try {
+      await showSetupDialog(context);
+    } catch (err) {
+      logger.warn('[Extension] Setup dialog failed, continuing without blocking activation:', err);
+    }
 
     // Check for updates to installed components (only if user hasn't dismissed update prompts)
-    const updateDismissedVersion = context.workspaceState.get<string>('aiSkeleton.updateDismissedVersion', '');
-    const currentVersion = vscode.extensions.getExtension('jasdeepn.ai-skeleton-extension')?.packageJSON?.version || '0.0.0';
-    
-    const hasUpdates = await checkForUpdates(context);
-    if (hasUpdates && updateDismissedVersion !== currentVersion) {
-      const action = await vscode.window.showInformationMessage(
-        '🔄 AI Skeleton has new component definitions. Merge updates while preserving your customizations?',
-        { modal: false },
-        'Merge Updates',
-        'Later'
-      );
-      if (action === 'Merge Updates') {
-        await reinstallAll(context);
-      } else {
-        // User chose "Later" or dismissed - remember for this version
-        await context.workspaceState.update('aiSkeleton.updateDismissedVersion', currentVersion);
+    try {
+      const updateDismissedVersion = context.workspaceState.get<string>('aiSkeleton.updateDismissedVersion', '');
+      const currentVersion = vscode.extensions.getExtension('jasdeepn.ai-skeleton-extension')?.packageJSON?.version || '0.0.0';
+      
+      const hasUpdates = await checkForUpdates(context);
+      if (hasUpdates && updateDismissedVersion !== currentVersion) {
+        const action = await vscode.window.showInformationMessage(
+          '🔄 AI Skeleton has new component definitions. Merge updates while preserving your customizations?',
+          { modal: false },
+          'Merge Updates',
+          'Later'
+        );
+        if (action === 'Merge Updates') {
+          await reinstallAll(context);
+        } else {
+          // User chose "Later" or dismissed - remember for this version
+          await context.workspaceState.update('aiSkeleton.updateDismissedVersion', currentVersion);
+        }
       }
+    } catch (err) {
+      logger.warn('[Extension] Update check skipped, continuing activation:', err);
     }
   }
 
   // Re-detect memory after potential setup
   await memoryService.detectMemoryBank();
+
+  // Quick startup check: if entries exist but lack embeddings, prompt user to sync
+  const runEmbeddingCoverageCheck = async () => {
+    try {
+      // Skip in tests to avoid modal interference
+      if (isTestEnvironment) return;
+
+      const state = await memoryService.detectMemoryBank();
+      if (!state.active) return;
+
+      const memoryStore = getMemoryStore();
+      const counts = await memoryStore.getEntryCounts();
+      const totalEntries = Object.values(counts).reduce((sum, n) => sum + n, 0);
+      if (totalEntries === 0) return;
+
+      const embeddedCount = await memoryStore.countEntriesWithEmbeddings();
+      const missing = totalEntries - embeddedCount;
+      if (missing <= 0) return;
+
+      const currentVersion = vscode.extensions.getExtension('jasdeepn.ai-skeleton-extension')?.packageJSON?.version || '0.0.0';
+      const dismissedForVersion = context.workspaceState.get<string>('aiSkeleton.embeddingCoverageDismissedVersion', '');
+      if (dismissedForVersion === currentVersion) return;
+
+      const action = await vscode.window.showInformationMessage(
+        `AI-Memory embeddings pending: ${missing}/${totalEntries} entries need vectors. Generate now?`,
+        'Generate embeddings',
+        'Later'
+      );
+
+      if (action === 'Generate embeddings') {
+        await vscode.commands.executeCommand('aiSkeleton.memory.generateEmbeddings');
+      } else if (action === 'Later') {
+        await context.workspaceState.update('aiSkeleton.embeddingCoverageDismissedVersion', currentVersion);
+      }
+    } catch (err) {
+      logger.warn('[Extension] Embedding coverage check skipped:', err);
+    }
+  };
+
+  runEmbeddingCoverageCheck();
 
   // Initialize token counter service with LRU cache
   const tokenCounterService = TokenCounterService.getInstance();
@@ -1290,6 +1339,103 @@ export async function activate(context: vscode.ExtensionContext) {
     }
   }));
 
+  // Generate embeddings for all entries (background indexing)
+  context.subscriptions.push(vscode.commands.registerCommand('aiSkeleton.memory.generateEmbeddings', async () => {
+    const state = await memoryService.detectMemoryBank();
+    if (!state.active) {
+      vscode.window.showWarningMessage('AI-Memory not active. Create one first.');
+      return;
+    }
+
+    logger.info('[Embeddings] Starting full embedding generation for all entries');
+    await vscode.window.withProgress({
+      location: vscode.ProgressLocation.Notification,
+      title: 'Generating embeddings for memory entries',
+      cancellable: false
+    }, async (progress) => {
+      try {
+        const memoryStore = getMemoryStore();
+        
+        // Get all entries
+        const allTypes: ('CONTEXT' | 'DECISION' | 'PROGRESS' | 'PATTERN' | 'BRIEF')[] = ['CONTEXT', 'DECISION', 'PROGRESS', 'PATTERN', 'BRIEF'];
+        let allEntries: any[] = [];
+        
+        for (const type of allTypes) {
+          const result = await memoryStore.queryByType(type, 1000);
+          allEntries = allEntries.concat(result.entries);
+        }
+
+        const total = allEntries.length;
+        progress.report({ increment: 0, message: `Found ${total} entries` });
+
+        // Filter entries that don't have embeddings
+        const entriesWithEmbeddings = await memoryStore.queryEntriesWithEmbeddings(10000);
+        const idsWithEmbeddings = new Set(entriesWithEmbeddings.map(e => e.id));
+        const entriesNeedingEmbeddings = allEntries.filter(e => !idsWithEmbeddings.has(e.id));
+
+        if (entriesNeedingEmbeddings.length === 0) {
+          vscode.window.showInformationMessage('All entries already have embeddings!');
+          return;
+        }
+
+        progress.report({ message: `Generating embeddings for ${entriesNeedingEmbeddings.length} entries...` });
+
+        // Generate embeddings with progress updates
+        const { getEmbeddingService, quantizeEmbedding } = await import('./embeddingService');
+        const embeddingService = getEmbeddingService();
+        
+        let processed = 0;
+        let failed = 0;
+        let skipped = 0;
+        for (const entry of entriesNeedingEmbeddings) {
+          try {
+            const content = typeof entry.content === 'string' ? entry.content : '';
+            if (!content.trim()) {
+              skipped++;
+              logger.warn(`[Embeddings] Skipping empty entry ${entry.id}`);
+              continue;
+            }
+
+            const result = await embeddingService.embed(content);
+            const quantized = quantizeEmbedding(result.embedding);
+            const buffer = Buffer.from(quantized);
+
+            // Update the entry with the embedding
+            if (memoryStore.backend === 'better-sqlite3') {
+              const stmt = (memoryStore as any).db.prepare(`UPDATE entries SET embedding = ? WHERE id = ?`);
+              stmt.run(buffer, entry.id);
+            } else if (memoryStore.backend === 'sql.js') {
+              (memoryStore as any).db.run(`UPDATE entries SET embedding = ? WHERE id = ?`, [buffer, entry.id]);
+              await (memoryStore as any).persistSqlJs();
+            }
+
+            processed++;
+            const percentage = Math.round((processed / entriesNeedingEmbeddings.length) * 100);
+            progress.report({ 
+              increment: 100 / entriesNeedingEmbeddings.length,
+              message: `${processed}/${entriesNeedingEmbeddings.length} (${percentage}%)`
+            });
+          } catch (err: any) {
+            const message = err?.message || String(err);
+            logger.error(`[Embeddings] Failed to generate embedding for entry ${entry.id}: ${message}`, err?.stack || err);
+            failed++;
+          }
+        }
+
+        if (failed > 0) {
+          logger.warn(`[Embeddings] Completed with failures. Processed ${processed}/${entriesNeedingEmbeddings.length}, failed ${failed}, skipped ${skipped}.`);
+          vscode.window.showWarningMessage(`Generated embeddings for ${processed}/${entriesNeedingEmbeddings.length} (skipped ${skipped}, failed ${failed}). See Output: AI Skeleton for details.`);
+        } else {
+          logger.info(`[Embeddings] Successfully generated embeddings for ${processed}/${entriesNeedingEmbeddings.length} entries (skipped ${skipped}).`);
+          vscode.window.showInformationMessage(`Successfully generated embeddings for ${processed}/${entriesNeedingEmbeddings.length} entries (skipped ${skipped}).`);
+        }
+      } catch (err) {
+        logger.error('[Embeddings] Fatal error during generation:', err);
+        vscode.window.showErrorMessage(`Failed to generate embeddings. See Output: AI Skeleton for details.`);
+      }
+    });
+  }));
+
   // Generic memory update command (accepts context, progress, or pattern updates)
   context.subscriptions.push(vscode.commands.registerCommand('aiSkeleton.memory.update', async (entry?: any) => {
     if (!entry) {
@@ -1340,6 +1486,62 @@ export async function activate(context: vscode.ExtensionContext) {
     await reload();
     provider.refresh();
     vscode.window.showInformationMessage('Prompts tree refreshed');
+  }));
+
+  // Export research report from RESEARCH phase entries
+  context.subscriptions.push(vscode.commands.registerCommand('aiSkeleton.memory.exportResearchReport', async () => {
+    try {
+      const success = await memoryService.savePhaseReport('research');
+      if (success) {
+        vscode.window.showInformationMessage('✓ Research report exported successfully');
+      } else {
+        vscode.window.showWarningMessage('No research entries found to export');
+      }
+    } catch (err) {
+      vscode.window.showErrorMessage(`Failed to export research report: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }));
+
+  // Export plan report from PLANNING phase entries
+  context.subscriptions.push(vscode.commands.registerCommand('aiSkeleton.memory.exportPlanReport', async () => {
+    try {
+      const success = await memoryService.savePhaseReport('planning');
+      if (success) {
+        vscode.window.showInformationMessage('✓ Plan report exported successfully');
+      } else {
+        vscode.window.showWarningMessage('No planning entries found to export');
+      }
+    } catch (err) {
+      vscode.window.showErrorMessage(`Failed to export plan report: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }));
+
+  // Export execution report from EXECUTION phase entries
+  context.subscriptions.push(vscode.commands.registerCommand('aiSkeleton.memory.exportExecutionReport', async () => {
+    try {
+      const success = await memoryService.savePhaseReport('execution');
+      if (success) {
+        vscode.window.showInformationMessage('✓ Execution report exported successfully');
+      } else {
+        vscode.window.showWarningMessage('No execution entries found to export');
+      }
+    } catch (err) {
+      vscode.window.showErrorMessage(`Failed to export execution report: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }));
+
+  // Export all phase reports (research, plan, execution)
+  context.subscriptions.push(vscode.commands.registerCommand('aiSkeleton.memory.exportAllReports', async () => {
+    try {
+      const success = await memoryService.saveAllPhaseReports();
+      if (success) {
+        vscode.window.showInformationMessage('✓ All phase reports exported successfully');
+      } else {
+        vscode.window.showWarningMessage('Some reports may have failed. Check the AI-Memory folder.');
+      }
+    } catch (err) {
+      vscode.window.showErrorMessage(`Failed to export reports: ${err instanceof Error ? err.message : String(err)}`);
+    }
   }));
 
   // React to configuration changes
