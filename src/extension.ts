@@ -1552,19 +1552,8 @@ export async function activate(context: vscode.ExtensionContext) {
     }
 
     try {
-      // Retrieve the entry from memory service
-      const entries = await memoryService.queryByType('CONTEXT'); // Get all entry types
-      let entry = entries.find((e: any) => e.id === entryId);
-
-      // If not found in CONTEXT, search other types
-      if (!entry) {
-        const allTypes = ['DECISION', 'PROGRESS', 'PATTERN', 'BRIEF', 'RESEARCH_REPORT', 'PLAN_REPORT', 'EXECUTION_REPORT'] as const;
-        for (const type of allTypes) {
-          const typeEntries = await memoryService.queryByType(type);
-          entry = typeEntries.find((e: any) => e.id === entryId);
-          if (entry) break;
-        }
-      }
+      // Use new getEntryById for efficient lookup
+      const entry = await memoryService.getStore().getEntryById(entryId);
 
       if (!entry) {
         vscode.window.showErrorMessage(`Entry not found (ID: ${entryId})`);
@@ -1578,6 +1567,56 @@ export async function activate(context: vscode.ExtensionContext) {
     } catch (error) {
       console.error('[Extension] Error opening memory entry:', error);
       vscode.window.showErrorMessage(`Failed to open entry: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }));
+
+  // Copy memory entry content to clipboard
+  context.subscriptions.push(vscode.commands.registerCommand('aiSkeleton.copyMemoryEntry', async (item: any) => {
+    const entryId = item?.meta?.entryId;
+    if (!entryId) {
+      vscode.window.showErrorMessage('No entry ID provided');
+      return;
+    }
+
+    try {
+      const entry = await memoryService.getStore().getEntryById(entryId);
+      if (!entry) {
+        vscode.window.showErrorMessage(`Entry not found (ID: ${entryId})`);
+        return;
+      }
+
+      await vscode.env.clipboard.writeText(entry.content);
+      vscode.window.showInformationMessage(`Copied "${entry.tag}" to clipboard`);
+    } catch (error) {
+      console.error('[Extension] Error copying memory entry:', error);
+      vscode.window.showErrorMessage(`Failed to copy entry: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }));
+
+  // Reference memory entry in current context
+  context.subscriptions.push(vscode.commands.registerCommand('aiSkeleton.referenceInContext', async (item: any) => {
+    const entryId = item?.meta?.entryId;
+    if (!entryId) {
+      vscode.window.showErrorMessage('No entry ID provided');
+      return;
+    }
+
+    try {
+      const entry = await memoryService.getStore().getEntryById(entryId);
+      if (!entry) {
+        vscode.window.showErrorMessage(`Entry not found (ID: ${entryId})`);
+        return;
+      }
+
+      // Create reference with preview of content
+      const preview = entry.content.substring(0, 300).replace(/\n/g, ' ');
+      const reference = `\n\n## Reference: ${entry.tag}\n**Type:** ${entry.file_type} | **ID:** ${entryId} | **Date:** ${entry.timestamp.split('T')[0]}\n\n${preview}${entry.content.length > 300 ? '...' : ''}\n\n[Full content available in Memory Entries tree]\n`;
+      
+      await memoryService.updateContext(reference);
+      vscode.window.showInformationMessage(`Referenced "${entry.tag}" in current context`);
+    } catch (error) {
+      console.error('[Extension] Error referencing memory entry:', error);
+      vscode.window.showErrorMessage(`Failed to reference entry: ${error instanceof Error ? error.message : String(error)}`);
     }
   }));
 

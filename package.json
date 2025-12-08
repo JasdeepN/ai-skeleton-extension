@@ -158,8 +158,18 @@
       },
       {
         "command": "aiSkeleton.memory.dump",
-        "title": "AI Skeleton: Dump Memory to Markdown",
-        "icon": "$(export)"
+        "title": "Export Memory Reports",
+        "category": "AI-Memory"
+      },
+      {
+        "command": "aiSkeleton.copyMemoryEntry",
+        "title": "Copy Content",
+        "category": "AI-Memory"
+      },
+      {
+        "command": "aiSkeleton.referenceInContext",
+        "title": "Reference in Context",
+        "category": "AI-Memory"
       },
       {
         "command": "aiSkeleton.memory.generateEmbeddings",
@@ -549,6 +559,21 @@
           "command": "aiSkeleton.installPrompt",
           "when": "view == aiSkeletonPrompts && viewItem == promptItem",
           "group": "inline"
+        },
+        {
+          "command": "aiSkeleton.openMemoryEntry",
+          "when": "view == aiSkeletonMemory && viewItem == memory-entry-item",
+          "group": "1_memory@1"
+        },
+        {
+          "command": "aiSkeleton.copyMemoryEntry",
+          "when": "view == aiSkeletonMemory && viewItem == memory-entry-item",
+          "group": "1_memory@2"
+        },
+        {
+          "command": "aiSkeleton.referenceInContext",
+          "when": "view == aiSkeletonMemory && viewItem == memory-entry-item",
+          "group": "2_reference@1"
         }
       ],
       "view/title": [

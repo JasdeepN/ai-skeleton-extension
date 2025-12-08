@@ -1793,6 +1793,14 @@ ${entry.content.trim()}`;
   }
 
   /**
+   * Get the underlying MemoryStore instance
+   * Useful for direct database access from extension commands
+   */
+  getStore() {
+    return this._store;
+  }
+
+  /**
    * Edit an existing memory entry (content, tag, or phase)
    * Useful for corrections, additions, or refining earlier entries
    * Example: Add research findings discovered during execution phase
@@ -1840,20 +1848,9 @@ ${entry.content.trim()}`;
     }
 
     try {
-      // Retrieve the entry from any type
-      const decisionResult = await this._store.queryByType('DECISION', 1000);
-      let entry = decisionResult.entries.find((e: StoreMemoryEntry) => e.id === id);
+      // Direct lookup by ID (works for all 8 entry types)
+      const entry = await this._store.getEntryById(id);
       
-      if (!entry) {
-        const contextResult = await this._store.queryByType('CONTEXT', 1000);
-        entry = contextResult.entries.find((e: StoreMemoryEntry) => e.id === id);
-      }
-      
-      if (!entry) {
-        const progressResult = await this._store.queryByType('PROGRESS', 1000);
-        entry = progressResult.entries.find((e: StoreMemoryEntry) => e.id === id);
-      }
-
       if (!entry) {
         console.error(`[MemoryService] Entry ${id} not found`);
         return false;

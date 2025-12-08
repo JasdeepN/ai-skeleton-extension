@@ -791,6 +791,63 @@ export class MemoryStore {
    * Update an existing entry (content, tag, or phase)
    * Regenerates embedding for semantic search consistency
    */
+  /**
+   * Get a single entry by ID (O(1) primary key lookup)
+   * Useful for direct access without filtering by type
+   */
+  async getEntryById(id: number): Promise<MemoryEntry | null> {
+    if (!this.db || !this.isInitialized) {
+      return null;
+    }
+
+    try {
+      if (this._backend === 'better-sqlite3') {
+        const stmt = this.db.prepare('SELECT * FROM entries WHERE id = ?');
+        const row = stmt.get(id);
+        if (!row) return null;
+
+        return {
+          id: row.id,
+          file_type: row.file_type,
+          timestamp: row.timestamp,
+          tag: row.tag,
+          content: row.content,
+          metadata: row.metadata,
+          phase: row.phase,
+          progress_status: row.progress_status,
+          embedding: row.embedding
+        };
+      } else if (this._backend === 'sql.js') {
+        const result = this.db.exec('SELECT * FROM entries WHERE id = ?', [id]);
+        if (!result[0] || result[0].values.length === 0) {
+          return null;
+        }
+
+        const row = result[0].values[0];
+        const columns = result[0].columns;
+        const entry: any = {};
+        columns.forEach((col: string, idx: number) => {
+          entry[col] = row[idx];
+        });
+
+        return {
+          id: entry.id,
+          file_type: entry.file_type,
+          timestamp: entry.timestamp,
+          tag: entry.tag,
+          content: entry.content,
+          metadata: entry.metadata,
+          phase: entry.phase,
+          progress_status: entry.progress_status,
+          embedding: entry.embedding
+        };
+      }
+    } catch (err) {
+      console.error('[MemoryStore] Get entry by ID failed:', err);
+    }
+    return null;
+  }
+
   async updateEntry(
     id: number,
     updates: Partial<Omit<MemoryEntry, 'id' | 'timestamp'>>
