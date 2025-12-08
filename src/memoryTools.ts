@@ -185,19 +185,58 @@ export class ShowMemoryTool implements vscode.LanguageModelTool<ShowMemoryParams
     const inputTokens = await options.tokenizationOptions?.countTokens(JSON.stringify(sanitizedInput)) ?? 0;
     
     const service = getMemoryService();
-    // Force DB-only: ignore options.input.file entirely to prevent markdown access
-    let content = await service.showMemory();
+    
+    // CRITICAL FIX: Use smart context selection instead of returning entire database
+    // Reserve 50K tokens for memory context within 200K total budget
+    const tokenBudget = 50000;
+    
+    let content: string;
+    const query = options.input?.query ?? 'recent relevant entries';
+    const limit = options.input?.limit ?? undefined;
+    
+    try {
+      // Use selectContextForBudget() for intelligent filtering
+      const selection = await service.selectContextForBudget(query, tokenBudget, {
+        useSemanticSearch: true, // Enable semantic search blending
+      });
+      
+      // Format selected entries with coverage stats
+      const selectedCount = selection.entries.length;
+      const totalCount = (await getMemoryStore().getEntryCounts());
+      const totalEntries = Object.values(totalCount).reduce((a, b) => a + b, 0);
+      
+      // Build response: selected entries + coverage stats + search results
+      let response = `[MEMORY SELECTION: SMART FILTERED]
 
-    // If query provided, append semantic search results (top-k)
-    if (options.input?.query) {
-      const limit = options.input?.limit ?? 5;
-      const semantic = await service.semanticSearch(options.input.query, limit);
-      if (semantic.entries.length > 0) {
-        const formatted = semantic.entries
-          .map(e => `- ${e.tag || e.file_type} (score: ${e.score ?? 'n/a'})\n${(e.content || '').slice(0, 200)}\n`)
-          .join('\n');
-        content += `\n\n[SEMANTIC MATCHES]\nQuery: ${options.input.query}\nTop ${semantic.entries.length} results:\n${formatted}`;
+Selected: ${selectedCount} / ${totalEntries} entries (${selection.coverage})
+Token Budget: ${selection.tokensUsed} / ${tokenBudget} tokens used
+
+---
+
+## Selected Entries
+
+${selection.formattedContext}`;
+
+      // If query provided and semantic search enabled, include semantic matches
+      if (options.input?.query && limit === undefined) {
+        try {
+          const semantic = await service.semanticSearch(options.input.query, 5);
+          if (semantic.entries.length > 0) {
+            const formatted = semantic.entries
+              .map(e => `- ${e.tag || e.file_type} (score: ${e.score ?? 'n/a'})\n${(e.content || '').slice(0, 200)}\n`)
+              .join('\n');
+            response += `\n\n---\n\n[SEMANTIC MATCHES]\nQuery: ${options.input.query}\nTop ${semantic.entries.length} results:\n${formatted}`;
+          }
+        } catch (err) {
+          // Silent fail - semantic search optional
+        }
       }
+      
+      content = response;
+    } catch (err) {
+      // Fallback: show basic memory structure if selection fails
+      console.error('[ShowMemoryTool] selectContextForBudget failed:', err);
+      content = await service.showMemory();
     }
 
     // Count output tokens
@@ -225,7 +264,7 @@ export class ShowMemoryTool implements vscode.LanguageModelTool<ShowMemoryParams
   ) {
     // Explicitly ignore file param to avoid any markdown access
     return {
-      invocationMessage: 'Reading AI-Memory contents (DB only)',
+      invocationMessage: 'Reading AI-Memory (smart filtered context selection)',
     };
   }
 }

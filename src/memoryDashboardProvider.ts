@@ -5,6 +5,31 @@ import * as vscode from 'vscode';
 import { FILE_TYPE_TO_DISPLAY, MemoryEntry } from './memoryStore';
 import { DashboardMetrics, getMemoryService } from './memoryService';
 import { getMetricsService } from './metricsService';
+import { detectPhase, WorkflowPhase } from './phaseDetector';
+import { parseWorkflowSteps, WorkflowStep } from './workflowParser';
+
+/**
+ * Calculate string similarity (0-1) using Levenshtein distance
+ */
+function calculateSimilarity(str1: string, str2: string): number {
+  const lower1 = str1.toLowerCase();
+  const lower2 = str2.toLowerCase();
+  
+  // Exact match
+  if (lower1 === lower2) return 1.0;
+  
+  // Contains match
+  if (lower1.includes(lower2) || lower2.includes(lower1)) return 0.8;
+  
+  // Word overlap
+  const words1 = new Set(lower1.split(/\s+/));
+  const words2 = new Set(lower2.split(/\s+/));
+  const intersection = [...words1].filter(w => words2.has(w));
+  const union = new Set([...words1, ...words2]);
+  const jaccard = intersection.length / union.size;
+  
+  return Math.max(0, jaccard);
+}
 
 const FILE_TYPE_LABELS: Record<MemoryEntry['file_type'], string> = {
   CONTEXT: 'Context',
@@ -34,16 +59,70 @@ export class MemoryDashboardTreeProvider implements vscode.TreeDataProvider<Dash
 
   private memoryService = getMemoryService();
   private cachedMetrics: DashboardMetrics | null = null;
+  private lastDetectedPhase: WorkflowPhase | null = null;
+  private phaseCheckTimer: NodeJS.Timeout | null = null;
+  private readonly PHASE_CHECK_INTERVAL = 2000; // Check every 2 seconds
 
   constructor() {
     this.memoryService.onDidChangeState(() => {
       this.refresh();
     });
+
+    // Monitor for phase transitions
+    this.startPhaseMonitoring();
+  }
+
+  /**
+   * Start monitoring for phase transitions
+   */
+  private startPhaseMonitoring(): void {
+    if (this.phaseCheckTimer) {
+      clearInterval(this.phaseCheckTimer);
+    }
+
+    this.phaseCheckTimer = setInterval(async () => {
+      try {
+        const currentPhase = await detectPhase();
+        if (currentPhase !== this.lastDetectedPhase) {
+          console.log(`[MemoryDashboard] Phase transition detected: ${this.lastDetectedPhase} → ${currentPhase}`);
+          this.lastDetectedPhase = currentPhase;
+          // Debounce refresh to avoid excessive tree updates
+          this.debounceRefresh();
+        }
+      } catch (error) {
+        // Silently handle detection errors
+      }
+    }, this.PHASE_CHECK_INTERVAL);
+  }
+
+  /**
+   * Debounced refresh to prevent excessive tree updates
+   */
+  private debounceRefreshTimer: NodeJS.Timeout | null = null;
+  private debounceRefresh(): void {
+    if (this.debounceRefreshTimer) {
+      clearTimeout(this.debounceRefreshTimer);
+    }
+    this.debounceRefreshTimer = setTimeout(() => {
+      this.refresh();
+    }, 300); // 300ms debounce delay
   }
 
   refresh(): void {
     this.cachedMetrics = null;
     this._onDidChangeTreeData.fire();
+  }
+
+  /**
+   * Cleanup resources (timers, listeners)
+   */
+  dispose(): void {
+    if (this.phaseCheckTimer) {
+      clearInterval(this.phaseCheckTimer);
+    }
+    if (this.debounceRefreshTimer) {
+      clearTimeout(this.debounceRefreshTimer);
+    }
   }
 
   getTreeItem(element: DashboardTreeItem): vscode.TreeItem {
@@ -66,10 +145,9 @@ export class MemoryDashboardTreeProvider implements vscode.TreeDataProvider<Dash
       return [
         new DashboardTreeItem('Status', vscode.TreeItemCollapsibleState.Expanded, 'status', metrics),
         new DashboardTreeItem('Context Switching', vscode.TreeItemCollapsibleState.Expanded, 'context-switching'),
+        new DashboardTreeItem('📚 Memory Entries', vscode.TreeItemCollapsibleState.Expanded, 'memory-entries'),
         new DashboardTreeItem('Metrics', vscode.TreeItemCollapsibleState.Expanded, 'metrics', metrics),
-        new DashboardTreeItem('Memory Bank', vscode.TreeItemCollapsibleState.Expanded, 'memory-bank'),
         new DashboardTreeItem('Semantic Search', vscode.TreeItemCollapsibleState.Expanded, 'semantic'),
-        new DashboardTreeItem('Latest Entries', vscode.TreeItemCollapsibleState.Collapsed, 'latest', metrics),
         new DashboardTreeItem('Actions', vscode.TreeItemCollapsibleState.Expanded, 'actions')
       ];
     }
@@ -81,6 +159,12 @@ export class MemoryDashboardTreeProvider implements vscode.TreeDataProvider<Dash
         return await this.buildContextSwitchingItems();
       case 'context-switching-phase':
         return await this.buildPhaseHistoryItems(element.meta as string);
+      case 'memory-entries':
+        return await this.buildMemoryEntriesSection();
+      case 'memory-entries-category':
+        return await this.buildEntriesForType(element.meta?.type);
+      case 'memory-entries-day':
+        return await this.buildEntriesForDay(element.meta?.type, element.meta?.date);
       case 'metrics':
         return await this.buildMetricsItems(element.meta as DashboardMetrics);
       case 'memory-bank':
@@ -243,6 +327,26 @@ export class MemoryDashboardTreeProvider implements vscode.TreeDataProvider<Dash
   private async buildContextSwitchingItems(): Promise<DashboardTreeItem[]> {
     const items: DashboardTreeItem[] = [];
 
+    // Detect current phase
+    const currentPhase = await detectPhase();
+    const phaseLabel = this.mapPhaseToLabel(currentPhase);
+
+    // Add Current Phase indicator at top
+    if (currentPhase && currentPhase !== null) {
+      const phaseIcon = this.getPhaseIcon(currentPhase);
+      const phaseItem = new DashboardTreeItem(
+        `${phaseIcon} Current Phase: ${phaseLabel}`,
+        vscode.TreeItemCollapsibleState.Expanded,
+        'current-phase'
+      );
+      phaseItem.description = 'Active workflow mode';
+      items.push(phaseItem);
+
+      // Add workflow steps for current phase
+      const phaseSteps = await this.buildCurrentPhaseSection(currentPhase);
+      items.push(...phaseSteps);
+    }
+
     // Current Context
     const current = await this.memoryService.getCurrentContext();
     const currentItem = new DashboardTreeItem(
@@ -300,6 +404,260 @@ export class MemoryDashboardTreeProvider implements vscode.TreeDataProvider<Dash
     items.push(newTaskItem);
 
     return items;
+  }
+
+  /**
+   * Build tree items for current phase's workflow steps
+   */
+  private async buildCurrentPhaseSection(phase: WorkflowPhase): Promise<DashboardTreeItem[]> {
+    if (!phase || phase === null) {
+      return [];
+    }
+
+    // Only process standard workflow phases (not checkpoint)
+    if (phase !== 'research' && phase !== 'planning' && phase !== 'execution') {
+      return [];
+    }
+
+    const items: DashboardTreeItem[] = [];
+    
+    try {
+      // Parse workflow steps for this phase
+      const steps = await parseWorkflowSteps(phase);
+      
+      if (steps.length === 0) {
+        return [];
+      }
+
+      // Match progress entries to workflow steps
+      const stepStatusMap = await this.matchProgressToSteps(phase, steps);
+
+      // Create tree items for each step
+      for (const step of steps) {
+        const status = stepStatusMap.get(step.order) || 'not-started';
+        const statusIcon = this.getStatusIcon(status);
+        
+        const stepItem = new DashboardTreeItem(
+          `${statusIcon} ${step.title}`,
+          vscode.TreeItemCollapsibleState.None,
+          'workflow-step',
+          { phase, step, status }
+        );
+        stepItem.description = step.description?.substring(0, 50) + (step.description?.length || 0 > 50 ? '…' : '');
+        items.push(stepItem);
+      }
+    } catch (error) {
+      console.error(`[Dashboard] Error building phase section for ${phase}:`, error);
+    }
+
+    return items;
+  }
+
+  /**
+   * Build memory entry tree section with 8 entry types
+   */
+  private async buildMemoryEntriesSection(): Promise<DashboardTreeItem[]> {
+    const items: DashboardTreeItem[] = [];
+
+    // Define entry types and their display labels
+    const entryTypes: Array<{ type: MemoryEntry['file_type']; label: string; icon: string }> = [
+      { type: 'RESEARCH_REPORT', label: 'Research Findings', icon: '🔍' },
+      { type: 'PLAN_REPORT', label: 'Implementation Plans', icon: '📐' },
+      { type: 'EXECUTION_REPORT', label: 'Execution Summaries', icon: '⚙️' },
+      { type: 'CONTEXT', label: 'Active Context', icon: '📍' },
+      { type: 'DECISION', label: 'Decisions', icon: '✓' },
+      { type: 'PROGRESS', label: 'Progress Tracking', icon: '📊' },
+      { type: 'PATTERN', label: 'System Patterns', icon: '🏗️' },
+      { type: 'BRIEF', label: 'Project Brief', icon: '📋' }
+    ];
+
+    try {
+      // Build category item for each entry type
+      for (const { type, label, icon } of entryTypes) {
+        const categoryItem = new DashboardTreeItem(
+          `${icon} ${label}`,
+          vscode.TreeItemCollapsibleState.Collapsed,
+          'memory-entries-category',
+          { type, label }
+        );
+        // Show count of entries
+        const entries = await this.memoryService.queryByType(type);
+        categoryItem.description = `${entries.length} ${entries.length === 1 ? 'entry' : 'entries'}`;
+        items.push(categoryItem);
+      }
+    } catch (error) {
+      console.error(`[Dashboard] Error building memory entries section:`, error);
+    }
+
+    return items;
+  }
+
+  /**
+   * Build day folders for a specific entry type
+   */
+  private async buildEntriesForType(type: MemoryEntry['file_type']): Promise<DashboardTreeItem[]> {
+    const items: DashboardTreeItem[] = [];
+
+    try {
+      // Query entries by type
+      const entries = await this.memoryService.queryByType(type);
+
+      if (entries.length === 0) {
+        const emptyItem = new DashboardTreeItem('No entries yet', vscode.TreeItemCollapsibleState.None, 'memory-entry-empty');
+        emptyItem.description = 'No entries of this type';
+        emptyItem.iconPath = new vscode.ThemeIcon('circle-outline');
+        return [emptyItem];
+      }
+
+      // Group entries by day (using timestamp, sorted by insert ID descending)
+      const entriesByDay = new Map<string, any[]>();
+      for (const entry of entries) {
+        const date = entry.timestamp ? entry.timestamp.split('T')[0] : 'Unknown';
+        if (!entriesByDay.has(date)) {
+          entriesByDay.set(date, []);
+        }
+        entriesByDay.get(date)!.push(entry);
+      }
+
+      // Sort days descending (newest first) and create day folder items
+      const sortedDays = Array.from(entriesByDay.keys()).sort((a, b) => b.localeCompare(a));
+      
+      for (const date of sortedDays) {
+        const dayEntries = entriesByDay.get(date)!;
+        // Sort entries within day by ID descending (newest first)
+        dayEntries.sort((a, b) => (b.id || 0) - (a.id || 0));
+        
+        const dayLabel = this.formatDateLabel(date);
+        const dayItem = new DashboardTreeItem(
+          `📅 ${dayLabel}`,
+          vscode.TreeItemCollapsibleState.Collapsed,
+          'memory-entries-day',
+          { type, date }
+        );
+        dayItem.description = `${dayEntries.length} ${dayEntries.length === 1 ? 'entry' : 'entries'}`;
+        items.push(dayItem);
+      }
+    } catch (error) {
+      console.error(`[Dashboard] Error building entries for type ${type}:`, error);
+      const errorItem = new DashboardTreeItem('Error loading entries', vscode.TreeItemCollapsibleState.None, 'memory-entry-error');
+      errorItem.description = 'Check console for details';
+      return [errorItem];
+    }
+
+    return items;
+  }
+
+  /**
+   * Build individual entry items for a specific day
+   */
+  private async buildEntriesForDay(type: MemoryEntry['file_type'], date: string): Promise<DashboardTreeItem[]> {
+    const items: DashboardTreeItem[] = [];
+
+    try {
+      // Query entries by type
+      const allEntries = await this.memoryService.queryByType(type);
+      
+      // Filter entries for this specific day and sort by ID descending
+      const dayEntries = allEntries
+        .filter(entry => entry.timestamp && entry.timestamp.split('T')[0] === date)
+        .sort((a, b) => (b.id || 0) - (a.id || 0));
+
+      if (dayEntries.length === 0) {
+        const emptyItem = new DashboardTreeItem('No entries', vscode.TreeItemCollapsibleState.None, 'memory-entry-empty');
+        emptyItem.iconPath = new vscode.ThemeIcon('circle-outline');
+        return [emptyItem];
+      }
+
+      // Create item for each entry
+      for (const entry of dayEntries) {
+        // Extract title from content (first non-empty line, clean markdown headers)
+        let title = (entry.content || '').split('\n').find(line => line.trim().length > 0) || 'Untitled';
+        title = title.replace(/^#+\s*/, '').trim(); // Remove markdown headers
+        if (title.length > 50) {
+          title = title.substring(0, 50) + '...';
+        }
+
+        const entryItem = new DashboardTreeItem(
+          title,
+          vscode.TreeItemCollapsibleState.None,
+          'memory-entry-item',
+          { entryId: entry.id, type }
+        );
+
+        // Show time in description
+        const time = entry.timestamp ? entry.timestamp.split('T')[1]?.substring(0, 5) || '' : '';
+        entryItem.description = time;
+        entryItem.iconPath = new vscode.ThemeIcon('note');
+
+        // Set command to open entry viewer
+        entryItem.command = {
+          command: 'aiSkeleton.openMemoryEntry',
+          title: 'View Entry',
+          arguments: [entry.id, title]
+        };
+
+        items.push(entryItem);
+      }
+    } catch (error) {
+      console.error(`[Dashboard] Error building entries for day ${date}:`, error);
+      const errorItem = new DashboardTreeItem('Error loading entries', vscode.TreeItemCollapsibleState.None, 'memory-entry-error');
+      errorItem.description = 'Check console for details';
+      return [errorItem];
+    }
+
+    return items;
+  }
+
+  /**
+   * Match progress entries to workflow steps using fuzzy matching
+   * Returns map of step order → status
+   */
+  private async matchProgressToSteps(phase: 'research' | 'planning' | 'execution', steps: WorkflowStep[]): Promise<Map<number, string>> {
+    const statusMap = new Map<number, string>();
+    
+    if (!phase) return statusMap;
+    
+    try {
+      // Query phase entries grouped by status
+      const phaseResult = await this.memoryService.queryByPhase(phase);
+      
+      // Flatten all status groups into single array
+      const phaseEntries = [...phaseResult.done, ...phaseResult.inProgress, ...phaseResult.draft];
+      
+      // For each step, find matching progress entry
+      for (const step of steps) {
+        let bestMatch: any = null;
+        let bestSimilarity = 0.6; // Minimum threshold
+        
+        for (const entry of phaseEntries) {
+          const similarity = calculateSimilarity(step.title, entry.content || '');
+          if (similarity > bestSimilarity) {
+            bestMatch = entry;
+            bestSimilarity = similarity;
+          }
+        }
+        
+        if (bestMatch) {
+          statusMap.set(step.order, bestMatch.progress_status || 'not-started');
+        }
+      }
+    } catch (error) {
+      console.warn(`[Dashboard] Error matching progress to steps:`, error);
+    }
+    
+    return statusMap;
+  }
+
+  /**
+   * Get status icon for workflow step
+   */
+  private getStatusIcon(status: string): string {
+    switch (status) {
+      case 'done': return '✓';
+      case 'doing': return '⏳';
+      case 'next': return '→';
+      default: return '☐';
+    }
   }
 
   private async buildPhaseHistoryItems(phase: string): Promise<DashboardTreeItem[]> {
@@ -456,6 +814,66 @@ export class MemoryDashboardTreeProvider implements vscode.TreeDataProvider<Dash
   private truncate(text: string, max: number): string {
     if (!text) return '';
     return text.length > max ? `${text.slice(0, max - 1)}…` : text;
+  }
+
+  /**
+   * Map workflow phase to user-friendly label
+   */
+  private mapPhaseToLabel(phase: WorkflowPhase): string {
+    if (!phase) return 'Unknown';
+    switch (phase) {
+      case 'research': return 'Think Mode';
+      case 'planning': return 'Plan Mode';
+      case 'execution': return 'Execute Mode';
+      case 'checkpoint': return 'Checkpoint Mode';
+      default: return 'Unknown';
+    }
+  }
+
+  /**
+   * Get icon for workflow phase
+   */
+  private getPhaseIcon(phase: WorkflowPhase): string {
+    if (!phase) return '❓';
+    switch (phase) {
+      case 'research': return '🔍';
+      case 'planning': return '📐';
+      case 'execution': return '⚙️';
+      case 'checkpoint': return '📍';
+      default: return '❓';
+    }
+  }
+
+  /**
+   * Format date for display (e.g., "Today", "Yesterday", or "Dec 7, 2025")
+   */
+  private formatDateLabel(date: string): string {
+    try {
+      const entryDate = new Date(date);
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      
+      const yesterday = new Date(today);
+      yesterday.setDate(yesterday.getDate() - 1);
+      
+      const entryDateOnly = new Date(entryDate);
+      entryDateOnly.setHours(0, 0, 0, 0);
+      
+      if (entryDateOnly.getTime() === today.getTime()) {
+        return 'Today';
+      } else if (entryDateOnly.getTime() === yesterday.getTime()) {
+        return 'Yesterday';
+      } else {
+        // Format as "Dec 7, 2025"
+        return entryDate.toLocaleDateString('en-US', { 
+          month: 'short', 
+          day: 'numeric', 
+          year: 'numeric' 
+        });
+      }
+    } catch (error) {
+      return date;
+    }
   }
 }
 

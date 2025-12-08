@@ -1544,6 +1544,43 @@ export async function activate(context: vscode.ExtensionContext) {
     }
   }));
 
+  // Open memory entry command (from dashboard tree)
+  context.subscriptions.push(vscode.commands.registerCommand('aiSkeleton.openMemoryEntry', async (entryId?: number, entryTag?: string) => {
+    if (!entryId) {
+      vscode.window.showErrorMessage('No entry ID provided');
+      return;
+    }
+
+    try {
+      // Retrieve the entry from memory service
+      const entries = await memoryService.queryByType('CONTEXT'); // Get all entry types
+      let entry = entries.find((e: any) => e.id === entryId);
+
+      // If not found in CONTEXT, search other types
+      if (!entry) {
+        const allTypes = ['DECISION', 'PROGRESS', 'PATTERN', 'BRIEF', 'RESEARCH_REPORT', 'PLAN_REPORT', 'EXECUTION_REPORT'] as const;
+        for (const type of allTypes) {
+          const typeEntries = await memoryService.queryByType(type);
+          entry = typeEntries.find((e: any) => e.id === entryId);
+          if (entry) break;
+        }
+      }
+
+      if (!entry) {
+        vscode.window.showErrorMessage(`Entry not found (ID: ${entryId})`);
+        return;
+      }
+
+      // Display entry in a read-only document
+      const content = `# ${entry.tag || entryTag || entry.file_type}\n\n**Type:** ${entry.file_type}\n**Date:** ${entry.timestamp}\n\n---\n\n${entry.content}`;
+      const doc = await vscode.workspace.openTextDocument({ content, language: 'markdown' });
+      await vscode.window.showTextDocument(doc, { preview: true, preserveFocus: false });
+    } catch (error) {
+      console.error('[Extension] Error opening memory entry:', error);
+      vscode.window.showErrorMessage(`Failed to open entry: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }));
+
   // React to configuration changes
   context.subscriptions.push(vscode.workspace.onDidChangeConfiguration(async (e: vscode.ConfigurationChangeEvent) => {
     if (e.affectsConfiguration('aiSkeleton.prompts.source')) {
