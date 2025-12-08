@@ -1,0 +1,31 @@
+#!/bin/bash
+# Pre-commit hook: Block markdown files in repo root
+# All memory/documentation should go to AI-Memory/ (database backed) not root .md files
+
+set -e
+
+STAGED_FILES=$(git diff --cached --name-only --diff-filter=ACM)
+
+for file in $STAGED_FILES; do
+  # Check if file is in root and ends with .md
+  if [[ "$file" =~ ^[^/]+\.md$ ]] && [[ "$file" != "README.md" ]] && [[ "$file" != "CONTRIBUTING.md" ]] && [[ "$file" != "LICENSE" ]] && [[ "$file" != "CHANGELOG.md" ]] && [[ "$file" != "INSTALLATION.md" ]] && [[ "$file" != "QUICKSTART.md" ]] && [[ "$file" != "RELEASE.md" ]]; then
+    echo "❌ ERROR: Cannot commit markdown file in repo root: $file"
+    echo ""
+    echo "📋 All documentation and memory should be stored in:"
+    echo "   - AI-Memory/ (database-backed entries)"
+    echo "   - .github/prompts/ (workflow prompts)"
+    echo "   - .github/agents/ (agent definitions)"
+    echo ""
+    echo "Allowed root .md files:"
+    echo "   - README.md (project overview)"
+    echo "   - CONTRIBUTING.md (contribution guide)"
+    echo "   - CHANGELOG.md (release notes)"
+    echo "   - INSTALLATION.md (setup guide)"
+    echo "   - QUICKSTART.md (quick reference)"
+    echo "   - RELEASE.md (release procedure)"
+    echo ""
+    exit 1
+  fi
+done
+
+exit 0
