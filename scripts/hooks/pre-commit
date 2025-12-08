@@ -8,7 +8,7 @@ STAGED_FILES=$(git diff --cached --name-only --diff-filter=ACM)
 
 for file in $STAGED_FILES; do
   # Check if file is in root and ends with .md
-  if [[ "$file" =~ ^[^/]+\.md$ ]] && [[ "$file" != "README.md" ]] && [[ "$file" != "CONTRIBUTING.md" ]] && [[ "$file" != "LICENSE" ]] && [[ "$file" != "CHANGELOG.md" ]] && [[ "$file" != "INSTALLATION.md" ]] && [[ "$file" != "QUICKSTART.md" ]] && [[ "$file" != "RELEASE.md" ]]; then
+  if [[ "$file" =~ ^[^/]+\.md$ ]] && [[ "$file" != "README.md" ]] && [[ "$file" != "CONTRIBUTING.md" ]] && [[ "$file" != "LICENSE" ]] && [[ "$file" != "CHANGELOG.md" ]] && [[ "$file" != "INSTALLATION.md" ]] && [[ "$file" != "QUICKSTART.md" ]] && [[ "$file" != "RELEASE.md" ]] && [[ "$file" != "GUARDRAILS.md" ]]; then
     echo "❌ ERROR: Cannot commit markdown file in repo root: $file"
     echo ""
     echo "📋 All documentation and memory should be stored in:"
@@ -23,6 +23,7 @@ for file in $STAGED_FILES; do
     echo "   - INSTALLATION.md (setup guide)"
     echo "   - QUICKSTART.md (quick reference)"
     echo "   - RELEASE.md (release procedure)"
+    echo "   - GUARDRAILS.md (safety restrictions)"
     echo ""
     exit 1
   fi

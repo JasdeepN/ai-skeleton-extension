@@ -170,7 +170,23 @@ Example user rules:
 -->
 
 ### Custom Restrictions
-<!-- Add your rules here -->
+
+**Agent Behavioral Constraint: No Root Markdown Files**
+- Agent MUST NEVER create .md files in repo root
+- Documentation routing:
+  - Memory entries → aiSkeleton memory tools only (updateProjectBrief, logDecision, updatePatterns, updateProgress, saveResearch, savePlan, saveExecution)
+  - Documentation → AI-Memory/ folder (database-backed) or .github/ directories
+  - Whitelisted root files only: README.md, CONTRIBUTING.md, CHANGELOG.md, INSTALLATION.md, QUICKSTART.md, RELEASE.md
+- Violation: Pre-commit hook will block commits containing unauthorized .md files
+- Rationale: All memory/docs must be queryable and versioned in database, not filesystem
+
+**Memory Bank Usage Rules**
+- Decision Log: Technical & architectural decisions with rationale
+- Pattern Log: Architectural patterns, conventions, best practices
+- Context Log: Current focus, task shifts, work status updates
+- Progress Log: Task completion tracking (done/doing/next)
+- Project Brief: Project goals, scope, features, constraints
+- DON'T put system constraints or agent instructions in memory bank - they belong in GUARDRAILS.md
 
 
 
