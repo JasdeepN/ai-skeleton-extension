@@ -9,26 +9,41 @@ import { detectPhase, WorkflowPhase } from './phaseDetector';
 import { parseWorkflowSteps, WorkflowStep } from './workflowParser';
 
 /**
- * Calculate string similarity (0-1) using Levenshtein distance
+ * Calculate string similarity (0-1) using normalized Jaccard with contains and a gated boost
  */
 function calculateSimilarity(str1: string, str2: string): number {
-  const lower1 = str1.toLowerCase();
-  const lower2 = str2.toLowerCase();
-  
-  // Exact match
-  if (lower1 === lower2) return 1.0;
-  
-  // Contains match
-  if (lower1.includes(lower2) || lower2.includes(lower1)) return 0.8;
-  
-  // Word overlap
-  const words1 = new Set(lower1.split(/\s+/));
-  const words2 = new Set(lower2.split(/\s+/));
-  const intersection = [...words1].filter(w => words2.has(w));
-  const union = new Set([...words1, ...words2]);
-  const jaccard = intersection.length / union.size;
-  
-  return Math.max(0, jaccard);
+  const normalize = (str: string = '') => str.replace(/([a-z])([A-Z])/g, '$1 $2').toLowerCase();
+  const left = normalize(str1 || '');
+  const right = normalize(str2 || '');
+
+  if (!left || !right) {
+    return left === right && left.length > 0 ? 1 : 0;
+  }
+
+  if (left === right) return 1.0;
+  if (left.includes(right) || right.includes(left)) return 0.8;
+
+  const tokenize = (str: string) =>
+    str
+      .split(/[^a-z0-9]+/i)
+      .map((w) => w.trim())
+      .filter(Boolean);
+
+  const aTokens = tokenize(left);
+  const bTokens = tokenize(right);
+  const setA = new Set(aTokens);
+  const setB = new Set(bTokens);
+  const intersection = [...setA].filter((w) => setB.has(w)).length;
+  const union = new Set([...aTokens, ...bTokens]).size;
+
+  const jaccard = union === 0 ? 0 : intersection / union;
+
+  // Boost only when we share multiple keywords across a larger combined vocabulary
+  if (intersection >= 2 && union >= 5) {
+    return Math.max(0.6, jaccard);
+  }
+
+  return jaccard;
 }
 
 const FILE_TYPE_LABELS: Record<MemoryEntry['file_type'], string> = {

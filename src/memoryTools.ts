@@ -10,6 +10,54 @@ import { detectPhase } from './phaseDetector';
 import { synthesizeResearchReport, synthesizePlanReport, synthesizeExecutionReport } from './reportSynthesizer';
 
 /**
+ * Content validation for memory tools - enforces tool→content mapping
+ * Rejects misuse per GUARDRAILS.md
+ */
+function validateContentForTool(toolName: string, content: string): { valid: boolean; error?: string } {
+  if (!content || content.trim().length === 0) {
+    return { valid: true }; // Empty content is OK (will be auto-synthesized)
+  }
+
+  const lowerContent = content.toLowerCase();
+
+  // RESEARCH_REPORT signatures: has problem analysis content
+  const isResearchContent =
+    content.includes('## Problem Statement') ||
+    content.includes('## Research Findings') ||
+    content.includes('## Approach Options') ||
+    content.includes('### Recommended Approach') ||
+    lowerContent.includes('analysis') && lowerContent.includes('findings');
+
+  // BRIEF signatures: has project-level scope content
+  const isBriefContent =
+    content.includes('## Project Goals') ||
+    content.includes('## Scope') ||
+    content.includes('## Objectives') ||
+    /\b(goals|objectives|scope|constraints|deliverables)\b/i.test(content) &&
+    content.length < 1000; // Briefs are typically short
+
+  if (toolName === 'saveResearch' && isBriefContent && !isResearchContent) {
+    return {
+      valid: false,
+      error: `[GUARDRAILS VIOLATION] saveResearch received project brief content.
+Use aiSkeleton_updateProjectBrief for project goals/scope/constraints instead.
+saveResearch is for: problem analysis, research findings, approach options.`
+    };
+  }
+
+  if (toolName === 'updateProjectBrief' && isResearchContent && !isBriefContent) {
+    return {
+      valid: false,
+      error: `[GUARDRAILS VIOLATION] updateProjectBrief received research content.
+Use aiSkeleton_saveResearch for: problem analysis, research findings, approach options.
+updateProjectBrief is ONLY for: project goals, scope, high-level constraints.`
+    };
+  }
+
+  return { valid: true };
+}
+
+/**
  * Generic wrapper for memory tools to eliminate boilerplate
  * Handles token counting, metrics logging, and phase detection
  */
@@ -24,6 +72,17 @@ function createMemoryTool<T extends Record<string, any>>(
       options: vscode.LanguageModelToolInvocationOptions<T>,
       _token: vscode.CancellationToken
     ): Promise<vscode.LanguageModelToolResult> {
+      // Validate content for certain tools
+      if ((operationName === 'saveResearch' || operationName === 'updateProjectBrief') && 
+          (options.input as any).content) {
+        const validation = validateContentForTool(operationName, (options.input as any).content);
+        if (!validation.valid) {
+          return new vscode.LanguageModelToolResult([
+            new vscode.LanguageModelTextPart(validation.error || 'Content validation failed')
+          ]);
+        }
+      }
+
       // Count input tokens
       const inputTokens = await options.tokenizationOptions?.countTokens(JSON.stringify(options.input)) ?? 0;
       

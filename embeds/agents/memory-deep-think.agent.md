@@ -28,15 +28,21 @@ target: vscode
 
 **ALL documentation MUST use aiSkeleton memory tools:**
 
-| Documentation Type | Required Tool | Target File |
-|-------------------|---------------|-------------|
-| Research Briefs | `aiSkeleton_updateProjectBrief` | projectBrief.md |
-| Current Focus/Context | `aiSkeleton_updateContext` | activeContext.md |
-| Technical Decisions | `aiSkeleton_logDecision` | decisionLog.md |
-| Progress/Plans | `aiSkeleton_updateProgress` | progress.md |
-| Patterns/Architecture | `aiSkeleton_updatePatterns` | systemPatterns.md |
+| Documentation Type | Required Tool | Target Storage |
+|-------------------|---------------|----------------|
+| Research Briefs (Deep Analysis) | `aiSkeleton_saveResearch` | RESEARCH_REPORT in database |
+| Project-Level Briefs (Goals/Scope ONLY) | `aiSkeleton_updateProjectBrief` | BRIEF in database |
+| Current Focus/Context | `aiSkeleton_updateContext` | CONTEXT in database |
+| Technical Decisions | `aiSkeleton_logDecision` | DECISION in database |
+| Progress/Plans | `aiSkeleton_updateProgress` | PROGRESS in database |
+| Patterns/Architecture | `aiSkeleton_updatePatterns` | PATTERN in database |
 
-**DO NOT create separate files. ALL research output goes into memory bank files.**
+**⚠️ CRITICAL TOOL USAGE RULES:**
+- **`saveResearch`**: Research findings, analysis, problem statements, approach options. NOT project briefs.
+- **`updateProjectBrief`**: ONLY for top-level project goals, scope, and constraints. NOT research content.
+- Misusing tools (e.g., research content in updateProjectBrief) is a guardrail violation.
+
+**DO NOT create separate files. ALL documentation goes through memory tools ONLY.**
 
 **IF IMPLEMENTATION IS NEEDED:**
 1. STOP all work

@@ -20,21 +20,21 @@ const AGENTS_DIR = path.join(__dirname, '../embeds/agents');
 
 /**
  * Extract all registered tool names from memoryTools.ts and map to marketplace IDs
- * Returns array of objects: { raw: 'aiSkeleton_showMemory', qualified: 'jasdeepn.ai-skeleton-extension/showMemory' }
+ * Returns object with both raw and qualified names to keep agents resilient to renames
  */
 function extractToolNames() {
   const content = fs.readFileSync(MEMORY_TOOLS_PATH, 'utf8');
   const packageJson = JSON.parse(fs.readFileSync(PACKAGE_JSON_PATH, 'utf8'));
-  
+
   // Match all vscode.lm.registerTool('toolName', ...) calls
   const registerPattern = /vscode\.lm\.registerTool\('(aiSkeleton_\w+)'/g;
-  const tools = [];
+  const rawTools = new Set();
   let match;
-  
+
   while ((match = registerPattern.exec(content)) !== null) {
-    tools.push(match[1]);
+    rawTools.add(match[1]);
   }
-  
+
   // Build mapping from package.json languageModelTools
   const toolMap = {};
   if (packageJson.contributes?.languageModelTools) {
@@ -45,14 +45,18 @@ function extractToolNames() {
       }
     });
   }
-  
-  // Generate only qualified marketplace IDs
-  const qualifiedTools = tools.sort().map(rawName => {
+
+  // Generate qualified marketplace IDs alongside raw tool IDs for robustness
+  const sortedRawTools = Array.from(rawTools).sort();
+  const qualifiedTools = sortedRawTools.map(rawName => {
     const referenceName = toolMap[rawName] || rawName.replace('aiSkeleton_', '');
     return `jasdeepn.ai-skeleton-extension/${referenceName}`;
   });
-  
-  return qualifiedTools;
+
+  // Combined list preserves raw IDs (for local/legacy) and qualified IDs (for marketplace)
+  const combinedTools = [...sortedRawTools, ...qualifiedTools];
+
+  return { rawTools: sortedRawTools, qualifiedTools, combinedTools };
 }
 
 /**
@@ -119,15 +123,19 @@ function main() {
   console.log('🔧 Syncing aiSkeleton tool names to agent configurations...\n');
   
   // Extract tool names from memoryTools.ts
-  const toolNames = extractToolNames();
+  const { rawTools, qualifiedTools, combinedTools } = extractToolNames();
   
-  if (toolNames.length === 0) {
+  if (combinedTools.length === 0) {
     console.error('❌ No aiSkeleton tools found in memoryTools.ts');
     process.exit(1);
   }
   
-  console.log(`📋 Found ${toolNames.length} registered tools (qualified):`);
-  toolNames.forEach(tool => console.log(`   - ${tool}`));
+  console.log(`📋 Found ${rawTools.length} registered tools (raw IDs):`);
+  rawTools.forEach(tool => console.log(`   - ${tool}`));
+  console.log();
+
+  console.log(`📦 Qualified marketplace tool IDs (${qualifiedTools.length}):`);
+  qualifiedTools.forEach(tool => console.log(`   - ${tool}`));
   console.log();
   
   // Update all agent files
@@ -142,7 +150,7 @@ function main() {
   
   let updatedCount = 0;
   agentFiles.forEach(agentPath => {
-    if (updateAgentTools(agentPath, toolNames)) {
+    if (updateAgentTools(agentPath, combinedTools)) {
       updatedCount++;
     }
   });

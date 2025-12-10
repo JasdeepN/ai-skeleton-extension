@@ -790,12 +790,9 @@ export async function activate(context: vscode.ExtensionContext) {
       if (!pick || pick === 'Cancel') { vscode.window.showInformationMessage('Install-all canceled.'); return; }
       promptOverwrite = pick === 'Overwrite All' ? 'overwrite' : 'skip';
     }
+    // Always overwrite agent files - they are templates from the extension, not user-modified
+    // Use the UI command with --keep-local flag if you want to preserve existing files
     let agentOverwrite: 'overwrite'|'skip'|'cancel' = 'overwrite';
-    if (existingAgents.length) {
-      const pick = await vscode.window.showInformationMessage(`.github/agents already has ${existingAgents.length} file(s). Overwrite?`, 'Overwrite All', 'Skip existing', 'Cancel');
-      if (!pick || pick === 'Cancel') { vscode.window.showInformationMessage('Install-all canceled.'); return; }
-      agentOverwrite = pick === 'Overwrite All' ? 'overwrite' : 'skip';
-    }
 
     const confirmProtected = await vscode.window.showWarningMessage('Install protected files (.copilotignore, PROTECTED_FILES.md) into .github? These define agent behavior.', 'Yes, proceed', 'Cancel');
     if (!confirmProtected || confirmProtected === 'Cancel') { vscode.window.showInformationMessage('Install-all canceled (protected files).'); return; }
@@ -836,7 +833,6 @@ export async function activate(context: vscode.ExtensionContext) {
       for (const a of agentsToInstall) {
         const target = vscode.Uri.joinPath(destAgents, a.filename);
         let exists = false; try { await vscode.workspace.fs.stat(target); exists = true; } catch {}
-        if (exists && agentOverwrite === 'skip') { skippedAgents++; tick('Agents'); continue; }
         try { await vscode.workspace.fs.writeFile(target, encode(a.content)); writtenAgents++; } catch (e) { console.error(e); }
         tick('Agents');
       }
@@ -1551,7 +1547,13 @@ export async function activate(context: vscode.ExtensionContext) {
     vscode.workspace.registerTextDocumentContentProvider('aiSkeleton-memory', memoryViewerProvider)
   );
 
-  context.subscriptions.push(vscode.commands.registerCommand('aiSkeleton.openMemoryEntry', async (entryId?: number, entryTag?: string) => {
+  const openMemoryEntryCommands = [
+    'aiSkeleton.openMemoryEntry',
+    // Alias for forward compatibility if command id changes in menus/tests
+    'aiSkeleton.memory.openEntry'
+  ];
+
+  const openMemoryEntryHandler = async (entryId?: number, entryTag?: string) => {
     if (!entryId) {
       vscode.window.showErrorMessage('No entry ID provided');
       return;
@@ -1575,7 +1577,11 @@ export async function activate(context: vscode.ExtensionContext) {
       console.error('[Extension] Error opening memory entry:', error);
       vscode.window.showErrorMessage(`Failed to open entry: ${error instanceof Error ? error.message : String(error)}`);
     }
-  }));
+  };
+
+  openMemoryEntryCommands.forEach(commandId => {
+    context.subscriptions.push(vscode.commands.registerCommand(commandId, openMemoryEntryHandler));
+  });
 
   // Copy memory entry content to clipboard
   context.subscriptions.push(vscode.commands.registerCommand('aiSkeleton.copyMemoryEntry', async (item: any) => {

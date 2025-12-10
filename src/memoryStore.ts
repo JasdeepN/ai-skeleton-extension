@@ -151,15 +151,20 @@ export class MemoryStore {
       // Method 1: Use require.resolve to find sql.js location (works when extension has node_modules)
       try {
         const sqlJsPath = require.resolve('sql.js');
-        const distDir = path.dirname(sqlJsPath);
-        const wasmPath = path.join(distDir, 'sql-wasm.wasm');
-        wasmLoadAttempts.push(`require.resolve: ${wasmPath}`);
-        
-        if (fs.existsSync(wasmPath)) {
-          wasmBinary = fs.readFileSync(wasmPath);
-          console.log('[MemoryStore] Loaded wasm binary from:', wasmPath, 'size:', wasmBinary.length);
+        // Ensure sqlJsPath is a string before using path.dirname()
+        if (typeof sqlJsPath === 'string') {
+          const distDir = path.dirname(sqlJsPath);
+          const wasmPath = path.join(distDir, 'sql-wasm.wasm');
+          wasmLoadAttempts.push(`require.resolve: ${wasmPath}`);
+          
+          if (fs.existsSync(wasmPath)) {
+            wasmBinary = fs.readFileSync(wasmPath);
+            console.log('[MemoryStore] Loaded wasm binary from:', wasmPath, 'size:', wasmBinary.length);
+          } else {
+            console.warn('[MemoryStore] WASM not found at require.resolve path:', wasmPath);
+          }
         } else {
-          console.warn('[MemoryStore] WASM not found at require.resolve path:', wasmPath);
+          console.warn('[MemoryStore] require.resolve returned non-string:', typeof sqlJsPath, sqlJsPath);
         }
       } catch (e) {
         console.warn('[MemoryStore] Failed to load wasm from sql.js path:', e);
@@ -211,16 +216,25 @@ export class MemoryStore {
 
       // Initialize with wasmBinary directly - most reliable method
       // Polyfill navigator to avoid issues with newer Node.js versions
+      // Note: In newer Node.js, navigator may be read-only, so we catch that gracefully
       const globalObj = global as any;
       const hadNavigator = typeof globalObj.navigator !== 'undefined';
-      const oldNavigator = hadNavigator ? globalObj.navigator : undefined;
+      let navigatorPolyfilled = hadNavigator;
       
       if (!hadNavigator) {
         try {
-          globalObj.navigator = {};
+          // Try to set navigator if it doesn't exist
+          Object.defineProperty(globalObj, 'navigator', {
+            value: {},
+            writable: true,
+            configurable: true
+          });
+          navigatorPolyfilled = true;
         } catch (navErr) {
-          console.warn('[MemoryStore] Could not polyfill navigator:', navErr);
-          // Continue anyway, might still work
+          // If navigator is truly read-only, log but continue
+          // sql.js may still work without explicit navigator polyfill
+          console.warn('[MemoryStore] Navigator is read-only or cannot be polyfilled:', (navErr as any).message);
+          navigatorPolyfilled = false;
         }
       }
       
@@ -251,15 +265,13 @@ export class MemoryStore {
         console.error('[MemoryStore] Error during sql.js initialization or DB creation:', sqlErr);
         throw sqlErr;
       } finally {
-        // Restore navigator to original state
-        try {
-          if (hadNavigator) {
-            globalObj.navigator = oldNavigator;
-          } else {
+        // Cleanup: only attempt to remove navigator if we added it
+        if (!hadNavigator && navigatorPolyfilled) {
+          try {
             delete globalObj.navigator;
+          } catch (navCleanupErr) {
+            console.warn('[MemoryStore] Could not cleanup navigator:', navCleanupErr);
           }
-        } catch (navCleanupErr) {
-          console.warn('[MemoryStore] Could not restore navigator:', navCleanupErr);
         }
       }
     } catch (err) {
