@@ -73,8 +73,11 @@ function updateAgentTools(agentPath, toolNames) {
   const currentToolsLine = match[0];
   const currentTools = match[1].split(',').map(t => t.trim().replace(/^'|'$/g, ''));
   
-  // Filter out old jasdeepn.ai-skeleton-extension tools
-  const nonAiSkeletonTools = currentTools.filter(t => !t.startsWith('jasdeepn.ai-skeleton-extension/'));
+  // Filter out ALL aiSkeleton tools (both old raw format and qualified format)
+  const nonAiSkeletonTools = currentTools.filter(t => 
+    !t.startsWith('jasdeepn.ai-skeleton-extension/') && 
+    !t.startsWith('aiSkeleton_')
+  );
   
   // Find where to insert aiSkeleton tools (after 'new' tool, before 'extensions')
   const newIndex = nonAiSkeletonTools.findIndex(t => t === 'new');
