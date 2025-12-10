@@ -10,11 +10,12 @@
 - **DO NOT** create separate documentation files
 - **ALL output MUST go through aiSkeleton memory tools**
 
-| Output Type | Required Tool |
-|-------------|---------------|
-| Plans/Tasks | `aiSkeleton_updateProgress` |
-| Context | `aiSkeleton_updateContext` |
-| Decisions | `aiSkeleton_logDecision` |
+| Output Type | Required Tool | Purpose |
+|---|---|---|
+| Implementation Plans | `aiSkeleton_savePlan` | Task breakdown, step-by-step planning |
+| Plans/Tasks Status | `aiSkeleton_updateProgress` | Track plan status (done/doing/next) |
+| Context | `aiSkeleton_updateContext` | Current planning focus, blockers |
+| Decisions | `aiSkeleton_logDecision` | Design decisions made during planning |
 
 **When planning is complete:** State "Planning complete. Handoff to Execute mode for implementation."
 

@@ -85,14 +85,22 @@ Categories:
 - **Common Idioms**: Project-specific conventions
 
 #### Project Brief
-Update if core features changed:
+Update ONLY if project goals/scope changed:
 ```
 aiSkeleton_updateProjectBrief({
-  "content": "[Updated project information]"
+  "content": "[Updated project goals/scope/constraints]"
 })
 ```
-- Add new libraries or technologies to Technical Stack
-- Update overview if project scope shifted
+**IMPORTANT:** Use for project-level info ONLY:
+- Top-level goals and objectives
+- Project scope and boundaries
+- Technical constraints
+- Target users/audience
+
+**DO NOT use for:**
+- Research findings (use `aiSkeleton_saveResearch`)
+- Implementation plans (use `aiSkeleton_savePlan`)
+- Task details (use `aiSkeleton_updateProgress`)
 
 ### Step 3: Review Workflow and Instruction Files
 
