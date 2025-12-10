@@ -53,10 +53,10 @@ function extractToolNames() {
     return `jasdeepn.ai-skeleton-extension/${referenceName}`;
   });
 
-  // Combined list preserves raw IDs (for local/legacy) and qualified IDs (for marketplace)
-  const combinedTools = [...sortedRawTools, ...qualifiedTools];
-
-  return { rawTools: sortedRawTools, qualifiedTools, combinedTools };
+  // Use ONLY qualified marketplace IDs (single source of truth)
+  // Bare names (aiSkeleton_*) are internal implementation details, not for agent tools arrays
+  
+  return { rawTools: sortedRawTools, qualifiedTools };
 }
 
 /**
@@ -123,18 +123,18 @@ function main() {
   console.log('🔧 Syncing aiSkeleton tool names to agent configurations...\n');
   
   // Extract tool names from memoryTools.ts
-  const { rawTools, qualifiedTools, combinedTools } = extractToolNames();
+  const { rawTools, qualifiedTools } = extractToolNames();
   
-  if (combinedTools.length === 0) {
+  if (qualifiedTools.length === 0) {
     console.error('❌ No aiSkeleton tools found in memoryTools.ts');
     process.exit(1);
   }
   
-  console.log(`📋 Found ${rawTools.length} registered tools (raw IDs):`);
+  console.log(`📋 Found ${rawTools.length} registered tools (internal implementation):`);
   rawTools.forEach(tool => console.log(`   - ${tool}`));
   console.log();
 
-  console.log(`📦 Qualified marketplace tool IDs (${qualifiedTools.length}):`);
+  console.log(`📦 Using ${qualifiedTools.length} qualified marketplace tool IDs in agent files:`);
   qualifiedTools.forEach(tool => console.log(`   - ${tool}`));
   console.log();
   
@@ -150,7 +150,7 @@ function main() {
   
   let updatedCount = 0;
   agentFiles.forEach(agentPath => {
-    if (updateAgentTools(agentPath, combinedTools)) {
+    if (updateAgentTools(agentPath, qualifiedTools)) {
       updatedCount++;
     }
   });
