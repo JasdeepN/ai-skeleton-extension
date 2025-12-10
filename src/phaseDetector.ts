@@ -132,6 +132,32 @@ export async function detectPhase(systemPrompt?: string): Promise<WorkflowPhase>
           }
         }
       }
+
+      // Fallback: infer from most recent phase report entries
+      if (!detectedPhase) {
+        const reportTypes: Array<{ type: 'RESEARCH_REPORT' | 'PLAN_REPORT' | 'EXECUTION_REPORT'; phase: WorkflowPhase }> = [
+          { type: 'RESEARCH_REPORT', phase: 'research' },
+          { type: 'PLAN_REPORT', phase: 'planning' },
+          { type: 'EXECUTION_REPORT', phase: 'execution' }
+        ];
+
+        let latestReport: { phase: WorkflowPhase; timestamp: string } | null = null;
+
+        for (const report of reportTypes) {
+          const result = await store.queryByType(report.type, 1);
+          if (result.entries.length > 0) {
+            const ts = result.entries[0].timestamp || '';
+            if (!latestReport || ts.localeCompare(latestReport.timestamp) > 0) {
+              latestReport = { phase: report.phase, timestamp: ts };
+            }
+          }
+        }
+
+        if (latestReport) {
+          console.log(`[PhaseDetector] Detected phase '${latestReport.phase}' from latest phase report entry`);
+          detectedPhase = latestReport.phase;
+        }
+      }
     } catch (err) {
       console.warn('[PhaseDetector] Failed to query memory for phase detection:', err);
     }

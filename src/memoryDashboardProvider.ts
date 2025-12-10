@@ -461,9 +461,9 @@ export class MemoryDashboardTreeProvider implements vscode.TreeDataProvider<Dash
 
     // Define entry types and their display labels
     const entryTypes: Array<{ type: MemoryEntry['file_type']; label: string; icon: string }> = [
-      { type: 'RESEARCH_REPORT', label: 'Research Findings', icon: '🔍' },
-      { type: 'PLAN_REPORT', label: 'Implementation Plans', icon: '📐' },
-      { type: 'EXECUTION_REPORT', label: 'Execution Summaries', icon: '⚙️' },
+      { type: 'RESEARCH_REPORT', label: 'Research Reports', icon: '🔍' },
+      { type: 'PLAN_REPORT', label: 'Plan Reports', icon: '📐' },
+      { type: 'EXECUTION_REPORT', label: 'Execution Reports', icon: '⚙️' },
       { type: 'CONTEXT', label: 'Active Context', icon: '📍' },
       { type: 'DECISION', label: 'Decisions', icon: '✓' },
       { type: 'PROGRESS', label: 'Progress Tracking', icon: '📊' },
@@ -638,7 +638,8 @@ export class MemoryDashboardTreeProvider implements vscode.TreeDataProvider<Dash
         }
         
         if (bestMatch) {
-          statusMap.set(step.order, bestMatch.progress_status || 'not-started');
+          const normalizedStatus = this.normalizeStatus(bestMatch.progress_status as string | undefined, bestMatch.file_type);
+          statusMap.set(step.order, normalizedStatus === 'draft' ? 'not-started' : normalizedStatus);
         }
       }
     } catch (error) {
@@ -646,6 +647,23 @@ export class MemoryDashboardTreeProvider implements vscode.TreeDataProvider<Dash
     }
     
     return statusMap;
+  }
+
+  /**
+   * Normalize various progress status strings into dashboard-friendly values
+   */
+  private normalizeStatus(status?: string, fileType?: string): 'done' | 'doing' | 'next' | 'draft' {
+    if (!status || status.trim().length === 0) {
+      // Treat phase reports as completed
+      if (fileType && fileType.endsWith('_REPORT')) return 'done';
+      return 'draft';
+    }
+
+    const lower = status.toLowerCase();
+    if (lower === 'done') return 'done';
+    if (lower === 'next') return 'next';
+    if (lower === 'doing' || lower === 'in-progress') return 'doing';
+    return 'draft';
   }
 
   /**

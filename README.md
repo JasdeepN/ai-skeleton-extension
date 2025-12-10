@@ -1,7 +1,9 @@
 # AI Skeleton Prompts & Memory
 
-[![CI Tests](https://github.com/JasdeepN/ai-skeleton-extension/actions/workflows/test.yml/badge.svg)](https://github.com/JasdeepN/ai-skeleton-extension/actions/workflows/test.yml)
+[![CI Tests](https://github.com/JasdeepN/ai-skeleton-extension/actions/workflows/ci.yml/badge.svg)](https://github.com/JasdeepN/ai-skeleton-extension/actions/workflows/ci.yml)
 [![codecov](https://codecov.io/gh/JasdeepN/ai-skeleton-extension/branch/main/graph/badge.svg)](https://codecov.io/gh/JasdeepN/ai-skeleton-extension)
+
+⚠️ **WORK IN PROGRESS**: This extension is under active development. Features may not work fully, may break, or may be removed/changed without notice. Use at your own risk.
 
 **Complete AI agent toolkit for VS Code**: Native memory management, workflow prompts, MCP integration, and agent definitions.
 
@@ -15,6 +17,13 @@ This extension extends **Copilot agent** context and memory capabilities by prov
 4. **Agent Definitions** - Pre-configured agent modes (Memory & Deep Thinking)
 
 ## 📦 Installation
+
+### Recent updates
+
+- `appendEntry()` ID retrieval (sql.js): fixed a backend edge-case where append operations could return null. The implementation now uses a dual-strategy lookup (primary: last_insert_rowid(), fallback: MAX(id)) to reliably return saved entry IDs.
+- `ShowMemoryTool` now uses `selectContextForBudget()` to provide token-budgeted, semantically-relevant context (default token budget ≈ 50k) rather than dumping the entire DB into prompts.
+- `scripts/sync-agent-tools.js` now emits only fully-qualified marketplace tool IDs (e.g. `JasdeepN.ai-skeleton-extension/showMemory`) in embedded agent frontmatter. Runtime tool registration remains `aiSkeleton_*` for the extension.
+- New `@aiSkeleton` chat participant with guaranteed LM tool invocation and token tracking; improved Memory Dashboard UX with read-only entry viewer and phase tracking.
 
 ### Requirements
 
@@ -81,6 +90,8 @@ Switch to agent mode in Copilot and select the Memory & Deep Thinking agent from
 ### 1. AI-Memory Tools (Language Model Tools)
 
 Agents can autonomously invoke these tools on VS Code 1.95+:
+
+Note: At runtime the extension registers tools under `aiSkeleton_*` names (e.g. `aiSkeleton_showMemory`). For release artifacts and embedded agent frontmatter, the sync/embedding process now writes fully-qualified marketplace tool IDs of the form `JasdeepN.ai-skeleton-extension/<toolReferenceName>` (for example `JasdeepN.ai-skeleton-extension/showMemory`). This keeps release assets compatible with Marketplace tooling and agent validation.
 
 | Tool | Purpose | Parameters |
 |------|---------|------------|
@@ -210,13 +221,13 @@ On VS Code 1.95+, agents can autonomously use memory tools. Use Extension Develo
 ```yaml
 # .github/agents/memory-deep-think.agent.md
 tools:
-  - aiSkeleton_showMemory
-  - aiSkeleton_logDecision
-  - aiSkeleton_updateContext
-  - aiSkeleton_updateProgress
-  - aiSkeleton_updatePatterns
-  - aiSkeleton_updateProjectBrief
-  - aiSkeleton_markDeprecated
+  - JasdeepN.ai-skeleton-extension/showMemory
+  - JasdeepN.ai-skeleton-extension/logDecision
+  - JasdeepN.ai-skeleton-extension/updateContext
+  - JasdeepN.ai-skeleton-extension/updateProgress
+  - JasdeepN.ai-skeleton-extension/updatePatterns
+  - JasdeepN.ai-skeleton-extension/updateBrief
+  - JasdeepN.ai-skeleton-extension/markDeprecated
 ```
 
 Agent automatically invokes tools during conversation. No manual intervention needed.

@@ -16,6 +16,7 @@ import { TokenCounterService } from './tokenCounterService';
 import { getMetricsService } from './metricsService';
 import { createChatParticipant } from './chatParticipant';
 import { logger } from './logger';
+import { MemoryEntryViewerProvider } from './memoryEntryViewer';
 
 async function resolvePrompts(): Promise<Prompt[]> {
   const source = vscode.workspace.getConfiguration().get<'auto'|'embedded'|'workspace'>('aiSkeleton.prompts.source', 'auto');
@@ -1544,7 +1545,12 @@ export async function activate(context: vscode.ExtensionContext) {
     }
   }));
 
-  // Open memory entry command (from dashboard tree)
+  // Open memory entry command (from dashboard tree) - shows in single editor tab
+  const memoryViewerProvider = new MemoryEntryViewerProvider(memoryService);
+  context.subscriptions.push(
+    vscode.workspace.registerTextDocumentContentProvider('aiSkeleton-memory', memoryViewerProvider)
+  );
+
   context.subscriptions.push(vscode.commands.registerCommand('aiSkeleton.openMemoryEntry', async (entryId?: number, entryTag?: string) => {
     if (!entryId) {
       vscode.window.showErrorMessage('No entry ID provided');
@@ -1552,18 +1558,19 @@ export async function activate(context: vscode.ExtensionContext) {
     }
 
     try {
-      // Use new getEntryById for efficient lookup
-      const entry = await memoryService.getStore().getEntryById(entryId);
+      // Update the viewer to show this entry
+      memoryViewerProvider.setCurrentEntry(entryId);
 
-      if (!entry) {
-        vscode.window.showErrorMessage(`Entry not found (ID: ${entryId})`);
-        return;
-      }
-
-      // Display entry in a read-only document
-      const content = `# ${entry.tag || entryTag || entry.file_type}\n\n**Type:** ${entry.file_type}\n**Date:** ${entry.timestamp}\n\n---\n\n${entry.content}`;
-      const doc = await vscode.workspace.openTextDocument({ content, language: 'markdown' });
-      await vscode.window.showTextDocument(doc, { preview: true, preserveFocus: false });
+      // Open/focus the single persistent editor
+      const uri = vscode.Uri.parse(`aiSkeleton-memory://memory-entry/${entryId}`);
+      const doc = await vscode.workspace.openTextDocument(uri);
+      
+      // Show in editor (non-preview so it persists and can be re-used)
+      await vscode.window.showTextDocument(doc, { 
+        preview: false,
+        preserveFocus: false,
+        viewColumn: vscode.ViewColumn.Beside
+      });
     } catch (error) {
       console.error('[Extension] Error opening memory entry:', error);
       vscode.window.showErrorMessage(`Failed to open entry: ${error instanceof Error ? error.message : String(error)}`);

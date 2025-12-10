@@ -15,13 +15,16 @@ const fs = require('fs');
 const path = require('path');
 
 const MEMORY_TOOLS_PATH = path.join(__dirname, '../src/memoryTools.ts');
+const PACKAGE_JSON_PATH = path.join(__dirname, '../package.json');
 const AGENTS_DIR = path.join(__dirname, '../embeds/agents');
 
 /**
- * Extract all registered tool names from memoryTools.ts
+ * Extract all registered tool names from memoryTools.ts and map to marketplace IDs
+ * Returns array of objects: { raw: 'aiSkeleton_showMemory', qualified: 'jasdeepn.ai-skeleton-extension/showMemory' }
  */
 function extractToolNames() {
   const content = fs.readFileSync(MEMORY_TOOLS_PATH, 'utf8');
+  const packageJson = JSON.parse(fs.readFileSync(PACKAGE_JSON_PATH, 'utf8'));
   
   // Match all vscode.lm.registerTool('toolName', ...) calls
   const registerPattern = /vscode\.lm\.registerTool\('(aiSkeleton_\w+)'/g;
@@ -32,7 +35,24 @@ function extractToolNames() {
     tools.push(match[1]);
   }
   
-  return tools.sort(); // Alphabetical order
+  // Build mapping from package.json languageModelTools
+  const toolMap = {};
+  if (packageJson.contributes?.languageModelTools) {
+    packageJson.contributes.languageModelTools.forEach(tool => {
+      if (tool.name && tool.toolReferenceName) {
+        // aiSkeleton_showMemory -> showMemory
+        toolMap[tool.name] = tool.toolReferenceName;
+      }
+    });
+  }
+  
+  // Generate only qualified marketplace IDs
+  const qualifiedTools = tools.sort().map(rawName => {
+    const referenceName = toolMap[rawName] || rawName.replace('aiSkeleton_', '');
+    return `jasdeepn.ai-skeleton-extension/${referenceName}`;
+  });
+  
+  return qualifiedTools;
 }
 
 /**
@@ -53,8 +73,8 @@ function updateAgentTools(agentPath, toolNames) {
   const currentToolsLine = match[0];
   const currentTools = match[1].split(',').map(t => t.trim().replace(/^'|'$/g, ''));
   
-  // Filter out old aiSkeleton tools
-  const nonAiSkeletonTools = currentTools.filter(t => !t.startsWith('aiSkeleton_'));
+  // Filter out old jasdeepn.ai-skeleton-extension tools
+  const nonAiSkeletonTools = currentTools.filter(t => !t.startsWith('jasdeepn.ai-skeleton-extension/'));
   
   // Find where to insert aiSkeleton tools (after 'new' tool, before 'extensions')
   const newIndex = nonAiSkeletonTools.findIndex(t => t === 'new');
@@ -81,7 +101,7 @@ function updateAgentTools(agentPath, toolNames) {
   
   if (updatedContent !== content) {
     fs.writeFileSync(agentPath, updatedContent, 'utf8');
-    console.log(`✅ Updated ${path.basename(agentPath)} with ${toolNames.length} aiSkeleton tools`);
+    console.log(`✅ Updated ${path.basename(agentPath)} with ${toolNames.length} extension tools`);
     return true;
   }
   
@@ -103,7 +123,7 @@ function main() {
     process.exit(1);
   }
   
-  console.log(`📋 Found ${toolNames.length} registered tools:`);
+  console.log(`📋 Found ${toolNames.length} registered tools (qualified):`);
   toolNames.forEach(tool => console.log(`   - ${tool}`));
   console.log();
   

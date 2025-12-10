@@ -973,20 +973,47 @@ export class MemoryBankService {
    * Query entries by phase (research, planning, execution, checkpoint)
    * Returns entries grouped by progress_status
    */
-  async queryByPhase(phase: 'research' | 'planning' | 'execution' | 'checkpoint'): Promise<{
+  async queryByPhase(phase: 'research' | 'planning' | 'execution' | 'checkpoint', limit: number = 500): Promise<{
     done: StoreMemoryEntry[];
     inProgress: StoreMemoryEntry[];
     draft: StoreMemoryEntry[];
   }> {
+    const normalizeStatus = (status: string | null | undefined, fileType?: string): 'done' | 'doing' | 'next' | 'draft' => {
+      if (!status || status.trim().length === 0) {
+        // Treat phase reports as completed work by default
+        if (fileType && fileType.endsWith('_REPORT')) {
+          return 'done';
+        }
+        return 'draft';
+      }
+
+      const lower = status.toLowerCase();
+      if (lower === 'done') return 'done';
+      if (lower === 'next') return 'next';
+      if (lower === 'doing' || lower === 'in-progress') return 'doing';
+      return 'draft';
+    };
+
     try {
-      const result = await this._store.queryByType('CONTEXT', 500); // Query all with higher limit
-      const entries = result.entries.filter((e: any) => e.phase === phase);
-      
-      return {
-        done: entries.filter((e: any) => e.progress_status === 'done'),
-        inProgress: entries.filter((e: any) => e.progress_status === 'in-progress'),
-        draft: entries.filter((e: any) => !e.progress_status || (e.progress_status !== 'done' && e.progress_status !== 'in-progress'))
-      };
+      // Pull all entries tagged with this phase (across ALL file types)
+      const entries = await this._store.queryByPhase(phase, limit);
+
+      const done: StoreMemoryEntry[] = [];
+      const inProgress: StoreMemoryEntry[] = [];
+      const draft: StoreMemoryEntry[] = [];
+
+      for (const entry of entries) {
+        const normalized = normalizeStatus((entry as any).progress_status, entry.file_type);
+        if (normalized === 'done') {
+          done.push(entry);
+        } else if (normalized === 'doing' || normalized === 'next') {
+          inProgress.push(entry);
+        } else {
+          draft.push(entry);
+        }
+      }
+
+      return { done, inProgress, draft };
     } catch (e) {
       console.error('Error querying by phase:', e);
       return { done: [], inProgress: [], draft: [] };
