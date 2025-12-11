@@ -354,10 +354,65 @@ async function installAgents(context: vscode.ExtensionContext, rootUri: vscode.U
   // Create directory
   await vscode.workspace.fs.createDirectory(agentsDir);
   
+  // Check for updates instead of auto-merging
+  const updates = await checkAgentUpdates(agentsDir, agents);
+  
+  if (updates.length > 0) {
+    // Prompt user about available updates
+    const choice = await vscode.window.showInformationMessage(
+      `${updates.length} agent(s) have updates available. Install the latest versions?`,
+      'Update Agents',
+      'Skip For Now',
+      'Ask Next Time'
+    );
+    
+    if (choice === 'Update Agents') {
+      // Install fresh versions
+      for (const agent of agents) {
+        const filePath = vscode.Uri.joinPath(agentsDir, agent.filename);
+        await vscode.workspace.fs.writeFile(filePath, encode(agent.content));
+      }
+      vscode.window.showInformationMessage('✅ Agents updated to latest versions');
+    }
+    // 'Skip For Now' and 'Ask Next Time' do nothing - will ask again next reload
+    return;
+  }
+  
+  // No updates needed, install only missing agents
   for (const agent of agents) {
     const filePath = vscode.Uri.joinPath(agentsDir, agent.filename);
-    await smartInstallFile(context, filePath, agent.content, `agent:${agent.id}`);
+    try {
+      await vscode.workspace.fs.stat(filePath);
+      // File exists and matches embedded version, skip
+    } catch {
+      // File doesn't exist, install it
+      await vscode.workspace.fs.writeFile(filePath, encode(agent.content));
+    }
   }
+}
+
+/**
+ * Check if agents have updates available
+ */
+async function checkAgentUpdates(agentsDir: vscode.Uri, agents: any[]): Promise<string[]> {
+  const updates: string[] = [];
+  
+  for (const agent of agents) {
+    const filePath = vscode.Uri.joinPath(agentsDir, agent.filename);
+    try {
+      const existingData = await vscode.workspace.fs.readFile(filePath);
+      const existingContent = decode(existingData);
+      
+      // Compare with embedded version
+      if (existingContent !== agent.content) {
+        updates.push(agent.filename);
+      }
+    } catch {
+      // File doesn't exist, not an update
+    }
+  }
+  
+  return updates;
 }
 
 /**
