@@ -7,6 +7,13 @@ module.exports = {
   Uri: {
     file: (path) => ({ fsPath: path, scheme: 'file', path }),
     parse: (uri) => ({ fsPath: uri, scheme: 'file', path: uri }),
+    joinPath: (...parts) => {
+      const joined = parts
+        .map((p) => (typeof p === 'string' ? p : p.path || p.fsPath || ''))
+        .filter(Boolean)
+        .join('/');
+      return { fsPath: joined, scheme: 'file', path: joined };
+    },
   },
   workspace: {
     getConfiguration: () => ({
@@ -27,6 +34,7 @@ module.exports = {
     fs: {
       readFile: () => Promise.resolve(Buffer.from('')),
       writeFile: () => Promise.resolve(),
+      createDirectory: () => Promise.resolve(),
       stat: () => Promise.resolve({ type: 1, size: 0 }),
       readDirectory: () => Promise.resolve([]),
     },

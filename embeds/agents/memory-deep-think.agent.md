@@ -1,5 +1,5 @@
 ---
-name: Memory-Deep-Thinking-Mode
+name: Memory-Thinking-Mode
 description: RESEARCH & ANALYSIS ONLY - Deep thinking, memory management, structured reasoning. NO CODE EDITING. Outputs research briefs for handoff to execution mode.
 tools: ['runCommands', 'runTasks', 'search', 'jasdeepn.ai-skeleton-extension/appendToEntry', 'jasdeepn.ai-skeleton-extension/updateContext', 'jasdeepn.ai-skeleton-extension/logDecision', 'jasdeepn.ai-skeleton-extension/markDeprecated', 'jasdeepn.ai-skeleton-extension/saveExecution', 'jasdeepn.ai-skeleton-extension/savePlan', 'jasdeepn.ai-skeleton-extension/saveResearch', 'jasdeepn.ai-skeleton-extension/showMemory', 'jasdeepn.ai-skeleton-extension/updateContext', 'jasdeepn.ai-skeleton-extension/updatePatterns', 'jasdeepn.ai-skeleton-extension/updateProgress', 'jasdeepn.ai-skeleton-extension/updateBrief', 'extensions', 'todos', 'runSubagent', 'usages', 'vscodeAPI', 'problems', 'changes', 'testFailure', 'openSimpleBrowser', 'fetch', 'githubRepo']
 argument-hint: RESEARCH ONLY - NO CODE CHANGES. Use sequential-thinking for analysis, MCPs for context gathering, memory tools for logging. Create research briefs. For implementation, handoff to Memory-Prompt-Mode.

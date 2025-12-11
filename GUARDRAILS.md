@@ -7,8 +7,6 @@ Agents should read and acknowledge these guardrails at the start of every sessio
 
 ---
 
-
-<!-- SYSTEM:START - DO NOT MODIFY THIS SECTION -->
 ## 🚫 ABSOLUTE RESTRICTIONS (NEVER VIOLATE)
 
 ### 1. Prompt Compliance
@@ -169,32 +167,8 @@ Example user rules:
 - Required test coverage: 80%
 -->
 
-### Custom Restrictions: Memory Tool Usage
-**Tool → File Type Mapping (ENFORCED AT RUNTIME)**
-
-| Marketplace ID | Valid Content | Signature | Invalid Use |
-|-------|------------|---------------|-------------|
-| `jasdeepn.ai-skeleton-extension/saveResearch` | Problem analysis, research findings, approach options | "## Problem Statement", "## Research Findings", "## Approach Options" | Project goals, scope, briefs |
-| `jasdeepn.ai-skeleton-extension/updateProjectBrief` | TOP-LEVEL GOALS & SCOPE ONLY | "## Project Goals", "## Scope", keywords: goals/scope/constraints + <1000 chars | Research, analysis, details |
-| `jasdeepn.ai-skeleton-extension/logDecision` | Architectural/technical choices + rationale | Clear decision + clear rationale pair | Vague statements |
-| `jasdeepn.ai-skeleton-extension/updateContext` | Current focus, active blockers, ongoing | Active/blockers keywords | Completed work (→updateProgress) |
-| `jasdeepn.ai-skeleton-extension/updateProgress` | Task status (done/doing/next), milestones | Status keywords (done, doing, next, blocked) | Active context (→updateContext) |
-| `jasdeepn.ai-skeleton-extension/updatePatterns` | Code patterns, conventions, architecture | Pattern, convention, architecture keywords | One-off decisions (→logDecision) |
-| `jasdeepn.ai-skeleton-extension/savePlan` | Implementation plans, task breakdown | "## Implementation Plan", numbered steps | Project briefs, decisions |
-| `jasdeepn.ai-skeleton-extension/saveExecution` | Execution summaries, completed results | "## Results", "## Summary", completion markers | Planning (→savePlan) |
-
-**Content Signature Detection (Runtime):**
-- **RESEARCH**: Contains "## Problem Statement" OR "## Research Findings" OR "## Approach Options"
-- **BRIEF**: Project scope keywords + content length < 1000 chars
-- **PLAN**: Numbered steps AND "## Implementation" pattern
-- **EXECUTION**: Result/completion markers AND execution phase context
-
-**Runtime Enforcement:**
-1. All tools validate content at invocation
-2. Signature mismatch → REJECTION with `[GUARDRAILS VIOLATION]` error
-3. Error message includes: tool name, content signature found, correct tool name
-4. Violations BLOCK persistence to database
-5. Clear user guidance on content fix
+### Custom Restrictions
+<!-- Add your rules here -->
 
 
 
@@ -210,10 +184,3 @@ Example user rules:
 
 *These guardrails exist to protect your codebase, secrets, and system integrity.*
 *AI agents should treat these rules as inviolable constraints, not suggestions.*
-
-<!-- SYSTEM:END -->
-
-<!-- USER:START - Your customizations below -->
-<!-- Add your customizations here. This section is preserved on extension updates. -->
-
-<!-- USER:END -->
