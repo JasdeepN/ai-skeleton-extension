@@ -3,7 +3,7 @@
 
 import * as vscode from 'vscode';
 import * as path from 'path';
-import { MemoryStore, MemoryEntry, FILENAME_TO_FILE_TYPE } from './memoryStore';
+import { MemoryStore, MemoryEntry, INPUT_TO_FILE_TYPE } from './memoryStore';
 
 export interface MigrationResult {
   success: boolean;

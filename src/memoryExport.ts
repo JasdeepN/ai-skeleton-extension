@@ -2,7 +2,7 @@
 // Enables backup and maintains human-readable format
 
 import * as vscode from 'vscode';
-import { MemoryStore, MemoryEntry, FILE_TYPE_TO_FILENAME } from './memoryStore';
+import { MemoryStore, MemoryEntry, FILE_TYPE_TO_DISPLAY } from './memoryStore';
 
 export interface ExportResult {
   success: boolean;
@@ -15,7 +15,18 @@ export interface ExportResult {
  * Get file name for memory entry type
  */
 function getFileNameForType(type: MemoryEntry['file_type']): string {
-  return FILE_TYPE_TO_FILENAME[type];
+  // Export to .md files for human-readable backup
+  const filenameMap: Record<MemoryEntry['file_type'], string> = {
+    CONTEXT: 'activeContext.md',
+    DECISION: 'decisionLog.md',
+    PROGRESS: 'progress.md',
+    PATTERN: 'systemPatterns.md',
+    BRIEF: 'projectBrief.md',
+    RESEARCH_REPORT: 'researchReport.md',
+    PLAN_REPORT: 'planReport.md',
+    EXECUTION_REPORT: 'executionReport.md'
+  };
+  return filenameMap[type];
 }
 
 /**
@@ -64,8 +75,9 @@ export async function exportSQLiteToMarkdown(
 
   // Collect all entries by type
   for (const type of types) {
-    const typeName = type.charAt(0) + type.slice(1).toLowerCase();
-    sections.push(`## ${typeName}\n`);
+    // Use display names from FILE_TYPE_TO_DISPLAY for consistency
+    const displayName = FILE_TYPE_TO_DISPLAY[type];
+    sections.push(`## ${displayName}\n`);
 
     try {
       // Get all entries of this type (up to 10000)
@@ -89,8 +101,8 @@ export async function exportSQLiteToMarkdown(
       sections.push(lines.join('\n\n') + '\n');
       result.entriesExported += sortedEntries.length;
     } catch (err) {
-      sections.push(`*Error loading ${typeName}: ${err}*\n`);
-      result.errors.push(`Failed to export ${typeName}: ${err}`);
+      sections.push(`*Error loading ${displayName}: ${err}*\n`);
+      result.errors.push(`Failed to export ${displayName}: ${err}`);
     }
     
     sections.push('\n---\n');

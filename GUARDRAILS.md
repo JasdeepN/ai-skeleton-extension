@@ -7,8 +7,6 @@ Agents should read and acknowledge these guardrails at the start of every sessio
 
 ---
 
-
-<!-- SYSTEM:START - DO NOT MODIFY THIS SECTION -->
 ## 🚫 ABSOLUTE RESTRICTIONS (NEVER VIOLATE)
 
 ### 1. Prompt Compliance
@@ -186,10 +184,3 @@ Example user rules:
 
 *These guardrails exist to protect your codebase, secrets, and system integrity.*
 *AI agents should treat these rules as inviolable constraints, not suggestions.*
-
-<!-- SYSTEM:END -->
-
-<!-- USER:START - Your customizations below -->
-<!-- Add your customizations here. This section is preserved on extension updates. -->
-
-<!-- USER:END -->

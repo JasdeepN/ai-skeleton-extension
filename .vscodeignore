@@ -3,14 +3,16 @@
 src/**
 .gitignore
 tsconfig.json
+webpack.config.js
 **/*.map
 **/*.ts
-!dist/**/*.js
-node_modules/**
-!node_modules/sql.js/**
+!dist/extension.js
+!dist/extension.js.map
 .eslintrc.json
 **/.DS_Store
 *.vsix
+node_modules/**
+!node_modules/sql.js/**
 
 # Build source files
 prompts/**

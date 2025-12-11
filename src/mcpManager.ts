@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import * as path from 'path';
 
 interface MCPConfig {
   servers: Record<string, any>;
@@ -64,14 +65,31 @@ export async function startMCPServers(context: vscode.ExtensionContext): Promise
       const existing = vscode.window.terminals.find(t => t.name === termName);
       if (existing) {
         // If terminal still active, skip starting again
-        existing.show(false);
         continue;
       }
 
-      const terminal = vscode.window.createTerminal({ name: termName, iconPath: new vscode.ThemeIcon('plug') });
-      const commandLine = [command, ...escapedArgs].join(' ');
+      // Create terminal in background without showing it
+      const terminal = vscode.window.createTerminal({ 
+        name: termName, 
+        iconPath: new vscode.ThemeIcon('plug'),
+        hideFromUser: true  // Keep terminal truly hidden/background
+      });
+
+      // If the command uses uvx, ensure we run it with a clean Python environment to avoid
+      // leaking user/site packages (e.g., ESP-IDF) that can break mcp-server-* dependencies.
+      const isUv = path.basename(command) === 'uvx' || command.includes('uvx ');
+      let commandLine = [command, ...escapedArgs].join(' ');
+
+      if (isUv) {
+        if (process.platform === 'win32') {
+          // Best-effort Windows equivalent: clear PYTHONPATH and disable user site packages
+          commandLine = `set PYTHONPATH=& set PYTHONNOUSERSITE=1& ${commandLine}`;
+        } else {
+          commandLine = `env -u PYTHONPATH PYTHONNOUSERSITE=1 ${commandLine}`;
+        }
+      }
       terminal.sendText(commandLine, true);
-      terminal.show(false);
+      // Don't show terminal - keep it in background
       context.subscriptions.push(terminal);
     } catch (err) {
       vscode.window.showErrorMessage(`Failed to start MCP server '${id}': ${err}`);
@@ -91,15 +109,24 @@ export async function maybeAutoStartMCPs(context: vscode.ExtensionContext): Prom
   const key = `aiSkeleton.mcp.autoStart.confirmed:${ws}`;
   const confirmed = context.globalState.get<boolean>(key, false);
   if (!confirmed) {
-    const action = await vscode.window.showInformationMessage('Start configured MCP servers on startup?', 'Start Now', 'Always', 'Not Now');
-    if (action === 'Always') {
+    const action = await vscode.window.showInformationMessage(
+      'Start configured MCP servers on startup?',
+      { title: 'Start Now' },
+      { title: "Don't Ask Again", isCloseAffordance: false },
+      { title: 'Cancel', isCloseAffordance: true }
+    );
+    
+    if (action?.title === 'Start Now') {
+      await startMCPServers(context);
+    } else if (action?.title === "Don't Ask Again") {
+      // Store preference and auto-start in the future
       await context.globalState.update(key, true);
       await startMCPServers(context);
-    } else if (action === 'Start Now') {
-      await startMCPServers(context);
     }
+    // Cancel does nothing, just returns
     return;
   }
 
+  // User previously selected "Don't Ask Again", so auto-start now
   await startMCPServers(context);
 }

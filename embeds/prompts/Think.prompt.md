@@ -10,13 +10,14 @@
 - **DO NOT** create separate documentation files
 - **ALL output MUST go through aiSkeleton memory tools**
 
-| Output Type | Required Tool |
-|-------------|---------------|
-| Research Briefs | `aiSkeleton_updateProjectBrief` |
-| Context/Focus | `aiSkeleton_updateContext` |
-| Decisions | `aiSkeleton_logDecision` |
-| Progress | `aiSkeleton_updateProgress` |
-| Patterns | `aiSkeleton_updatePatterns` |
+| Output Type | Required Tool | Purpose |
+|-------------|---|---|
+| Research Briefs (Analysis) | `aiSkeleton_saveResearch` | Problem analysis, findings, approach options |
+| Project Briefs (Goals/Scope) | `aiSkeleton_updateProjectBrief` | ONLY top-level project goals & scope |
+| Context/Focus | `aiSkeleton_updateContext` | Current focus, blockers, ongoing work |
+| Decisions | `aiSkeleton_logDecision` | Architectural/technical choices + rationale |
+| Progress | `aiSkeleton_updateProgress` | Task status (done/doing/next) |
+| Patterns | `aiSkeleton_updatePatterns` | Code patterns, conventions, architecture |
 
 **When research is complete:** State "Research complete. Handoff to Execute mode for implementation."
 

@@ -1,5 +1,7 @@
 # Changelog
 
+⚠️ **WORK IN PROGRESS**: This extension is under active development. Features may not work fully, may break, or may be removed/changed without notice. Use at your own risk.
+
 ## [Unreleased] - 0.1.23
 
 ### Added
@@ -51,6 +53,18 @@
   - Markdown export available anytime via `exportSQLiteToMarkdown()`
   - All existing memory files automatically migrated with no user action
   - Fallback to markdown if database unavailable
+
+### Fixed / Important
+
+- **appendEntry ID retrieval (sql.js)**: Fixed a silent failure where `appendEntry()` returned null on some sql.js backends. The code now uses a dual-strategy ID retrieval (primary: last_insert_rowid(), fallback: MAX(id)) ensuring saveResearch/savePlan/saveExecution and other append operations reliably return saved entry IDs.
+
+- **ShowMemoryTool behavior**: The `ShowMemoryTool` and `showMemory()` now use `selectContextForBudget()` to return smart, token-budgeted context (default 50K budget) and enable semantic-search blending. This prevents dumping the entire DB into agent prompts and keeps LM context within budget.
+
+- **sync-agent-tools script**: `scripts/sync-agent-tools.js` now emits only fully-qualified marketplace tool IDs (e.g. `jasdeepn.ai-skeleton-extension/showMemory`) in agent frontmatter, matching marketplace requirements and avoiding raw `aiSkeleton_*` entries in release artifacts.
+
+- **Chat participant: @aiSkeleton**: Added a dedicated chat participant that guarantees language model tool invocation and token tracking. This participant orchestrates LM tool calls, invokes `vscode.lm.invokeTool()` when the model requests it, and logs token metrics for every tool call.
+
+- **Memory Dashboard & UX**: Implemented real-time phase tracking in the Context Switching tree and a detailed Memory Entry Tree View with clickable entries. Entries open in a read-only virtual document (`aiSkeleton-memory://...`) and progress steps in the current workflow are matched to recent `PROGRESS` entries.
 
 ### Changed
 - **memoryService.ts**: Full refactor to use SQLite queries instead of file I/O
