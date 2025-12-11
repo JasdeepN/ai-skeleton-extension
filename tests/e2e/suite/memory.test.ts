@@ -150,18 +150,17 @@ suite('AI-Memory E2E Tests', () => {
 		await vscode.commands.executeCommand('aiSkeleton.memory.dump');
 		await new Promise(resolve => setTimeout(resolve, 2000));
 
-		// Now markdown files should exist
-		const expectedFiles = [
-			'activeContext.md',
-			'decisionLog.md',
-			'progress.md',
-			'systemPatterns.md',
-			'projectBrief.md'
-		];
-
-		expectedFiles.forEach(file => {
-			const filePath = path.join(memoryPath, file);
-			assert.ok(fs.existsSync(filePath), `${file} not created after dump`);
-		});
+		// Check that single memory.md file is created (SQLite-only mode)
+		const memoryFile = path.join(memoryPath, 'memory.md');
+		assert.ok(fs.existsSync(memoryFile), 'memory.md not created after dump');
+		
+		// Verify it contains sections for all entry types
+		const content = fs.readFileSync(memoryFile, 'utf-8');
+		assert.ok(content.includes('# AI-Memory Export'), 'Missing export header');
+		assert.ok(content.includes('## Project Brief'), 'Missing Brief section');
+		assert.ok(content.includes('## System Patterns'), 'Missing Patterns section');
+		assert.ok(content.includes('## Active Context'), 'Missing Context section');
+		assert.ok(content.includes('## Decision Log'), 'Missing Decisions section');
+		assert.ok(content.includes('## Progress'), 'Missing Progress section');
 	});
 });

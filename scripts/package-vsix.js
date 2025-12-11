@@ -119,7 +119,8 @@ function ensureDir(dir) {
   // Prefer npx vsce to avoid global requirement
   const vsixName = `${name}-${pkg.version}.vsix`;
   const outPath = path.join(outDir, vsixName);
-  run(`npx vsce package --out "${outPath}"`, { cwd: root });
+  // Allow star activation without interactive prompt (we intentionally use '*' to ensure activation)
+  run(`npx vsce package --allow-star-activation --out "${outPath}"`, { cwd: root });
 
   // Update last-version.json
   writeJSON(lastFile, { version: pkg.version, time: new Date().toISOString(), file: vsixName });

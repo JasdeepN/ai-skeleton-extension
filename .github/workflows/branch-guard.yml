@@ -1,0 +1,93 @@
+name: Branch Guard
+
+on:
+  pull_request:
+    branches:
+      - release
+      - staging
+
+  push:
+    branches:
+      - release
+      - staging
+
+jobs:
+  check_branch:
+    name: Enforce branch flow
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout with history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate staging receives only from dev
+        if: github.ref == 'refs/heads/staging' || github.base_ref == 'staging'
+        run: |
+          # Skip validation for automated workflow pushes (CI, Pre-Release bot)
+          if [ "${{ github.actor }}" = "github-actions[bot]" ] && [ "${{ github.event_name }}" = "push" ]; then
+            echo "✅ Automated workflow push - skipping validation"
+            exit 0
+          fi
+          
+          # Check if this is a version bump commit (contains [skip ci])
+          LAST_COMMIT_MSG=$(git log -1 --pretty=%B)
+          if echo "$LAST_COMMIT_MSG" | grep -q "\[skip ci\]"; then
+            echo "✅ Version bump commit - skipping validation"
+            exit 0
+          fi
+          
+          # For PR events, check head branch
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            if [ "${{ github.head_ref }}" != "dev" ]; then
+              echo "ERROR: Staging PRs must come from dev branch. Got: ${{ github.head_ref }}"
+              exit 1
+            fi
+          fi
+          
+          # For push events, verify commits originated from dev
+          if [ "${{ github.event_name }}" = "push" ]; then
+            git fetch origin dev --no-tags 2>/dev/null || true
+            
+            BEFORE="${{ github.event.before }}"
+            AFTER="${{ github.sha }}"
+            
+            # Get commits being pushed
+            COMMITS=$(git rev-list $BEFORE..$AFTER 2>/dev/null || echo "")
+            
+            for commit in $COMMITS; do
+              # Skip merge commits - check their parents instead
+              if git rev-parse --verify "${commit}^2" >/dev/null 2>&1; then
+                echo "ℹ️  Skipping merge commit $commit - validating parents"
+                
+                # For merge commits, verify at least one parent is from dev
+                PARENT1=$(git rev-parse "${commit}^1")
+                PARENT2=$(git rev-parse "${commit}^2")
+                
+                if ! git merge-base --is-ancestor "$PARENT2" origin/dev 2>/dev/null; then
+                  echo "ERROR: Merge commit $commit does not merge from dev branch."
+                  exit 1
+                fi
+              else
+                # Regular commit - must exist in dev
+                if ! git merge-base --is-ancestor "$commit" origin/dev 2>/dev/null; then
+                  echo "ERROR: Commit $commit is not from dev branch."
+                  exit 1
+                fi
+              fi
+            done
+          fi
+          
+          echo "✅ Staging update is from dev"
+
+      - name: Block direct pushes to release
+        if: github.event_name == 'push' && github.ref == 'refs/heads/release'
+        run: |
+          echo "ERROR: Direct pushes to 'release' are not allowed. Open a PR from 'staging'."
+          exit 1
+
+      - name: Block release unless from staging
+        if: github.base_ref == 'release' && github.head_ref != 'staging'
+        run: |
+          echo "ERROR: Only PRs from 'staging' may be merged into 'release'."
+          exit 1

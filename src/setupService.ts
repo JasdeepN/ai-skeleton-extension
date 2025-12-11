@@ -338,9 +338,38 @@ async function installPrompts(context: vscode.ExtensionContext, rootUri: vscode.
   // Create directory
   await vscode.workspace.fs.createDirectory(promptsDir);
   
+  // Check for updates
+  const updates = await checkFileUpdates(promptsDir, prompts);
+  
+  if (updates.length > 0) {
+    // Prompt user about available updates
+    const choice = await vscode.window.showInformationMessage(
+      `${updates.length} prompt(s) have updates available. Install the latest versions?`,
+      'Update Prompts',
+      'Later'
+    );
+    
+    if (choice === 'Update Prompts') {
+      // Install fresh versions
+      for (const prompt of prompts) {
+        const filePath = vscode.Uri.joinPath(promptsDir, prompt.filename);
+        await vscode.workspace.fs.writeFile(filePath, encode(prompt.content));
+      }
+      vscode.window.showInformationMessage('✅ Prompts updated to latest versions');
+    }
+    return;
+  }
+  
+  // No updates, install only missing prompts
   for (const prompt of prompts) {
     const filePath = vscode.Uri.joinPath(promptsDir, prompt.filename);
-    await smartInstallFile(context, filePath, prompt.content, `prompt:${prompt.id}`);
+    try {
+      await vscode.workspace.fs.stat(filePath);
+      // File exists and matches, skip
+    } catch {
+      // File doesn't exist, install it
+      await vscode.workspace.fs.writeFile(filePath, encode(prompt.content));
+    }
   }
 }
 
@@ -354,10 +383,109 @@ async function installAgents(context: vscode.ExtensionContext, rootUri: vscode.U
   // Create directory
   await vscode.workspace.fs.createDirectory(agentsDir);
   
+  // Check for updates instead of auto-merging
+  const updates = await checkAgentUpdates(agentsDir, agents);
+  
+  if (updates.length > 0) {
+    // Prompt user about available updates
+    const choice = await vscode.window.showInformationMessage(
+      `${updates.length} agent(s) have updates available. Install the latest versions?`,
+      'Update Agents',
+      'Later'
+    );
+    
+    if (choice === 'Update Agents') {
+      // Install fresh versions
+      for (const agent of agents) {
+        const filePath = vscode.Uri.joinPath(agentsDir, agent.filename);
+        await vscode.workspace.fs.writeFile(filePath, encode(agent.content));
+      }
+      vscode.window.showInformationMessage('✅ Agents updated to latest versions');
+    }
+    // 'Later' does nothing - will ask again next reload
+    return;
+  }
+  
+  // No updates needed, install only missing agents
   for (const agent of agents) {
     const filePath = vscode.Uri.joinPath(agentsDir, agent.filename);
-    await smartInstallFile(context, filePath, agent.content, `agent:${agent.id}`);
+    try {
+      await vscode.workspace.fs.stat(filePath);
+      // File exists and matches embedded version, skip
+    } catch {
+      // File doesn't exist, install it
+      await vscode.workspace.fs.writeFile(filePath, encode(agent.content));
+    }
   }
+}
+
+/**
+ * Check if files have updates available
+ */
+async function checkFileUpdates(dir: vscode.Uri, files: any[]): Promise<any[]> {
+  const updates: any[] = [];
+  
+  for (const file of files) {
+    const filePath = vscode.Uri.joinPath(dir, file.filename);
+    try {
+      const existingData = await vscode.workspace.fs.readFile(filePath);
+      const existingContent = decode(existingData);
+      
+      if (existingContent !== file.content) {
+        updates.push(file);
+      }
+    } catch {
+      // File doesn't exist, not an update
+    }
+  }
+  
+  return updates;
+}
+
+/**
+ * Check if protected files have updates available
+ */
+async function checkProtectedUpdates(filesWithPaths: any[]): Promise<any[]> {
+  const updates: any[] = [];
+  
+  for (const item of filesWithPaths) {
+    try {
+      const existingData = await vscode.workspace.fs.readFile(item.filePath);
+      const existingContent = decode(existingData);
+      
+      if (existingContent !== item.content) {
+        updates.push(item);
+      }
+    } catch {
+      // File doesn't exist, not an update
+    }
+  }
+  
+  return updates;
+}
+
+/**
+ * Check if agents have updates available
+ */
+async function checkAgentUpdates(agentsDir: vscode.Uri, agents: any[]): Promise<string[]> {
+  const updates: string[] = [];
+  
+  for (const agent of agents) {
+    const filePath = vscode.Uri.joinPath(agentsDir, agent.filename);
+    try {
+      const existingData = await vscode.workspace.fs.readFile(filePath);
+      const existingContent = decode(existingData);
+      
+      // Compare with embedded version
+      if (existingContent !== agent.content) {
+        updates.push(agent.filename);
+      }
+    } catch {
+      // File doesn't exist, not an update
+    }
+  }
+  
+  return updates;
 }
 
 /**
@@ -366,24 +494,59 @@ async function installAgents(context: vscode.ExtensionContext, rootUri: vscode.U
 async function installProtected(context: vscode.ExtensionContext, rootUri: vscode.Uri): Promise<void> {
   const protectedFiles = getProtectedFilesEmbedded();
   
-  for (const file of protectedFiles) {
+  // Build file list with paths
+  const filesWithPaths = protectedFiles.map(file => {
     let filePath: vscode.Uri;
     
-    // Special handling for different protected files
     if (file.filename === '.copilotignore') {
       filePath = vscode.Uri.joinPath(rootUri, '.copilotignore');
     } else if (file.filename === 'GUARDRAILS.md') {
       filePath = vscode.Uri.joinPath(rootUri, 'GUARDRAILS.md');
     } else if (file.filename === 'PROTECTED_FILES.md') {
-      // Install to .github/
       const githubDir = vscode.Uri.joinPath(rootUri, '.github');
-      await vscode.workspace.fs.createDirectory(githubDir);
       filePath = vscode.Uri.joinPath(githubDir, 'PROTECTED_FILES.md');
     } else {
       filePath = vscode.Uri.joinPath(rootUri, file.filename);
     }
     
-    await smartInstallFile(context, filePath, file.content, `protected:${file.id}`);
+    return { ...file, filePath };
+  });
+  
+  // Check for updates
+  const updates = await checkProtectedUpdates(filesWithPaths);
+  
+  if (updates.length > 0) {
+    // Prompt user about available updates
+    const updateNames = updates.map((u: any) => u.filename).join(', ');
+    const choice = await vscode.window.showInformationMessage(
+      `Protected files have updates: ${updateNames}. Install the latest versions?`,
+      'Update Files',
+      'Later'
+    );
+    
+    if (choice === 'Update Files') {
+      // Create directories and install
+      try { await vscode.workspace.fs.createDirectory(vscode.Uri.joinPath(rootUri, '.github')); } catch (e) { /* ignore */ }
+      
+      for (const item of filesWithPaths) {
+        await vscode.workspace.fs.writeFile(item.filePath, encode(item.content));
+      }
+      vscode.window.showInformationMessage('✅ Protected files updated to latest versions');
+    }
+    return;
+  }
+  
+  // No updates, install only missing files
+  try { await vscode.workspace.fs.createDirectory(vscode.Uri.joinPath(rootUri, '.github')); } catch (e) { /* ignore */ }
+  
+  for (const item of filesWithPaths) {
+    try {
+      await vscode.workspace.fs.stat(item.filePath);
+      // File exists and matches, skip
+    } catch {
+      // File doesn't exist, install it
+      await vscode.workspace.fs.writeFile(item.filePath, encode(item.content));
+    }
   }
 }
 
@@ -397,11 +560,27 @@ async function installMCP(context: vscode.ExtensionContext, rootUri: vscode.Uri)
   const mcpPath = vscode.Uri.joinPath(vscodeDir, 'mcp.json');
   const mcpContent = getMCPConfigString();
   
-  // MCP is simple config, no smart merge needed
+  // Check for updates
   try {
-    await vscode.workspace.fs.stat(mcpPath);
-    // File exists, don't overwrite
+    const existingData = await vscode.workspace.fs.readFile(mcpPath);
+    const existingContent = decode(existingData);
+    
+    if (existingContent !== mcpContent) {
+      // Config has changed, prompt user
+      const choice = await vscode.window.showInformationMessage(
+        'MCP configuration has updates. Install the latest version?',
+        'Update MCP Config',
+        'Later'
+      );
+      
+      if (choice === 'Update MCP Config') {
+        await vscode.workspace.fs.writeFile(mcpPath, encode(mcpContent));
+        vscode.window.showInformationMessage('✅ MCP configuration updated');
+      }
+    }
+    // If same, do nothing
   } catch {
+    // File doesn't exist, create it
     await vscode.workspace.fs.writeFile(mcpPath, encode(mcpContent));
   }
 }

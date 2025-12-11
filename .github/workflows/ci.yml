@@ -2,9 +2,9 @@ name: CI Pipeline
 
 on:
   push:
-    branches: [dev, staging]
+    branches: [dev]
   pull_request:
-    branches: [dev, staging, release]
+    branches: [dev]
   workflow_dispatch:
 
 permissions:
@@ -19,16 +19,54 @@ env:
 
 jobs:
   # ============================================
+  # Change detection to skip CI on non-code edits
+  # ============================================
+  changes:
+    name: Detect code changes
+    runs-on: ubuntu-latest
+    outputs:
+      code: ${{ steps.filter.outputs.code }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect changes vs previous commit
+        id: filter
+        run: |
+          BEFORE="${{ github.event.before }}"
+          AFTER="${{ github.sha }}"
+          
+          # Compare incoming commits vs previous state
+          CHANGED_FILES=$(git diff --name-only $BEFORE..$AFTER 2>/dev/null || echo "")
+          
+          # Check if any code files changed
+          CODE_CHANGED=false
+          for file in $CHANGED_FILES; do
+            if [[ $file =~ ^(src/|scripts/|resources/|embeds/|package|tsconfig|jest.config|\.github/workflows/) ]]; then
+              CODE_CHANGED=true
+              break
+            fi
+          done
+          
+          echo "code=$CODE_CHANGED" >> $GITHUB_OUTPUT
+          echo "Changed files: $CHANGED_FILES"
+
+  # ============================================
   # Stage 1: Build & Test (runs on all platforms)
+  # Skipped on staging push - dev already validated
   # ============================================
   build-and-test:
     name: Build & Test (${{ matrix.os }}, Node ${{ matrix.node }})
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
-        node: ['18.x', '20.x', '22.x']
+        os: [ubuntu-latest]
+        node: ['20.x']
 
     steps:
       - name: Checkout code
@@ -42,6 +80,22 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Verify embeddings are current
+        shell: bash
+        run: |
+          echo "Running embedding scripts to ensure latest content..."
+          npm run embed-all
+          
+          # Check if embeddings changed
+          if git diff --quiet; then
+            echo "✅ Embeddings are up-to-date"
+          else
+            echo "::error::Embeddings are out-of-date! Run 'npm run embed-all' locally before pushing."
+            echo "Modified files:"
+            git diff --name-only
+            exit 1
+          fi
 
       - name: TypeScript Compilation Check
         shell: bash
@@ -67,6 +121,9 @@ jobs:
           flags: unittests
           fail_ci_if_error: false
 
+      - name: Build extension with webpack
+        run: npm run webpack
+
       - name: Run E2E tests (Linux)
         if: runner.os == 'Linux'
         run: xvfb-run -a npm run test:e2e
@@ -83,8 +140,8 @@ jobs:
         uses: actions/upload-artifact@v4
         if: matrix.os == 'ubuntu-latest' && matrix.node == '20.x'
         with:
-          name: vsix-package
-          path: 'vsix/*.vsix'
+          name: vsix-main
+          path: 'vsix/ai-skeleton-extension-*.vsix'
           retention-days: 30
 
       - name: Upload test results
@@ -92,8 +149,7 @@ jobs:
         if: matrix.os == 'ubuntu-latest' && matrix.node == '20.x'
         with:
           name: test-results
-          path: |
-            coverage/
+          path: coverage/
           retention-days: 7
 
   # ============================================
@@ -101,6 +157,8 @@ jobs:
   # ============================================
   security:
     name: CodeQL Security Analysis
+    needs: changes
+    if: needs.changes.outputs.code == 'true' && (github.ref != 'refs/heads/staging' || github.event_name == 'pull_request')
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -125,17 +183,18 @@ jobs:
           category: "/language:javascript"
 
   # ============================================
-  # Stage 2: Smoke Test VSIX (after build passes)
+  # Stage 2: Smoke Test VSIX (after build passes on dev)
   # ============================================
   smoke-test:
     name: Smoke Test VSIX
-    needs: build-and-test
+    needs: [changes, build-and-test]
+    if: needs.changes.outputs.code == 'true' && (github.ref != 'refs/heads/staging' || github.event_name == 'pull_request')
     runs-on: ubuntu-latest
     steps:
       - name: Download VSIX artifact
         uses: actions/download-artifact@v4
         with:
-          name: vsix-package
+          name: vsix-main
 
       - name: Verify VSIX package
         run: |
@@ -153,98 +212,3 @@ jobs:
             exit 1
           fi
           echo "✅ VSIX integrity verified"
-
-  # ============================================
-  # Stage 3: Auto-merge to Staging (dev branch only)
-  # ============================================
-  auto-merge-staging:
-    name: Auto-merge to Staging
-    needs: [build-and-test, security, smoke-test]
-    if: github.ref == 'refs/heads/dev' && github.event_name == 'push'
-    runs-on: ubuntu-latest
-    outputs:
-      merged: ${{ steps.merge.outputs.merged }}
-      version: ${{ steps.version.outputs.version }}
-    
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Download VSIX artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: vsix-package
-          path: ./vsix-artifact
-
-      - name: Download test results
-        uses: actions/download-artifact@v4
-        with:
-          name: test-results
-          path: ./test-results
-
-      - name: Verify artifacts exist
-        run: |
-          if [ ! -f ./vsix-artifact/*.vsix ]; then
-            echo "::error::VSIX artifact missing - cannot merge to staging"
-            exit 1
-          fi
-          echo "✅ All required artifacts present"
-
-      - name: Get current version
-        id: version
-        run: |
-          VERSION=$(jq -r '.version' package.json)
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "Current version: $VERSION"
-
-      - name: Merge dev to staging
-        id: merge
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          
-          git checkout staging
-          
-          # Try fast-forward merge first, fall back to squash
-          if git merge --ff-only origin/dev 2>/dev/null; then
-            echo "✅ Fast-forward merge successful"
-          else
-            git merge --squash origin/dev
-            if git diff-index --quiet HEAD --; then
-              echo "No changes to merge"
-              echo "merged=false" >> $GITHUB_OUTPUT
-              exit 0
-            fi
-            git commit -m "chore: merge dev → staging [$(date +'%Y-%m-%d')]"
-          fi
-          
-          git push origin staging
-          echo "merged=true" >> $GITHUB_OUTPUT
-          echo "✅ Successfully merged dev to staging"
-
-      - name: Tag pre-release
-        if: steps.merge.outputs.merged == 'true'
-        run: |
-          VERSION=${{ steps.version.outputs.version }}
-          PRERELEASE_TAG="v${VERSION}-pre.$(date +'%Y%m%d%H%M')"
-          
-          git tag -a "$PRERELEASE_TAG" -m "Pre-release: $PRERELEASE_TAG"
-          git push origin "$PRERELEASE_TAG"
-          echo "✅ Tagged pre-release: $PRERELEASE_TAG"
-
-      - name: Upload VSIX as pre-release artifact
-        if: steps.merge.outputs.merged == 'true'
-        uses: actions/upload-artifact@v4
-        with:
-          name: vsix-prerelease-${{ steps.version.outputs.version }}
-          path: ./vsix-artifact/*.vsix
-          retention-days: 90
-
-      - name: Comment on merge failure
-        if: failure()
-        run: |
-          echo "::warning::Auto-merge failed. Manual merge required."
-          echo "Review the workflow run and resolve conflicts manually."

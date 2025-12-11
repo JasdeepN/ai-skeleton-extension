@@ -4,7 +4,7 @@ const path = require('path');
 const fs = require('fs');
 const minimist = require('minimist');
 
-const args = minimist(process.argv.slice(2), { string: ['dest'], boolean: ['overwrite'], alias: { d: 'dest', o: 'overwrite' } });
+const args = minimist(process.argv.slice(2), { string: ['dest'], boolean: ['overwrite', 'keep-local'], alias: { d: 'dest', o: 'overwrite', k: 'keep-local' } });
 const dest = args.dest || path.join(__dirname, '..', 'tmp-agent-install');
 const overwrite = !!args.overwrite;
 
@@ -28,7 +28,9 @@ if (!fs.existsSync(dist)) {
   let skipped = 0;
   for (const a of agents) {
     const targetPath = path.join(destAgentDir, a.filename);
-    if (fs.existsSync(targetPath) && !overwrite) {
+    // Always overwrite agent files - they are templates from the extension, not user-modified
+    // Use --keep-local flag if you want to preserve existing files
+    if (fs.existsSync(targetPath) && args.keepLocal && !overwrite) {
       skipped++;
       continue;
     }

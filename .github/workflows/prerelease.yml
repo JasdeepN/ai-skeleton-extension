@@ -1,0 +1,117 @@
+name: Pre-Release
+
+on:
+  push:
+    branches: [staging]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  id-token: write
+  issues: write
+  pull-requests: write
+
+env:
+  NODE_VERSION: '20.x'
+
+jobs:
+  prerelease:
+    name: Create Pre-Release
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Get current version
+        id: current-version
+        run: |
+          VERSION=$(jq -r '.version' package.json)
+          # Strip -alpha or any other pre-release tag
+          CLEAN_VERSION=$(echo "$VERSION" | sed 's/-.*$//')
+          echo "version=$CLEAN_VERSION" >> $GITHUB_OUTPUT
+          echo "📦 Pre-release version: $CLEAN_VERSION"
+
+      - name: Check for existing tag
+        id: tag-check
+        run: |
+          VERSION=${{ steps.current-version.outputs.version }}
+          git fetch --tags --prune --prune-tags
+          
+          if git rev-parse "refs/tags/v${VERSION}" >/dev/null 2>&1; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+            echo "⚠️ Tag v${VERSION} already exists, skipping"
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+            echo "✅ Creating new tag v${VERSION}"
+          fi
+
+      - name: Compile TypeScript
+        run: npm run compile
+
+      - name: Package VSIX
+        run: |
+          mkdir -p vsix
+          npx @vscode/vsce package --out vsix/ai-skeleton-extension-${{ steps.current-version.outputs.version }}.vsix --pre-release
+
+      - name: Create pre-release tag
+        if: steps.tag-check.outputs.exists == 'false'
+        run: |
+          git config user.name "Pre-Release Bot"
+          git config user.email "prerelease@bot.local"
+          
+          VERSION=${{ steps.current-version.outputs.version }}
+          git tag -a "v${VERSION}" -m "Pre-release v${VERSION}"
+          git push origin "v${VERSION}"
+          
+          # Update latest-prerelease tracking tag
+          git tag -f latest-prerelease
+          git push -f origin latest-prerelease
+          
+          echo "✅ Tagged v${VERSION}"
+
+      - name: Create GitHub pre-release
+        if: steps.tag-check.outputs.exists == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION=${{ steps.current-version.outputs.version }}
+          VSIX_FILE="vsix/ai-skeleton-extension-${VERSION}.vsix"
+          
+          # Create pre-release on GitHub
+          gh release create "v${VERSION}" \
+            --title "Pre-Release v${VERSION}" \
+            --notes "🚧 **Pre-release build from staging**
+            
+            Testing and early access version.
+            
+            **Requirements:**
+            - VS Code >= 1.95.0" \
+            --prerelease \
+            "$VSIX_FILE"
+          
+          echo "✅ Created GitHub pre-release v${VERSION}"
+
+      - name: Publish to VS Code Marketplace (Pre-release)
+        if: steps.tag-check.outputs.exists == 'false'
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+        run: |
+          VERSION=${{ steps.current-version.outputs.version }}
+          VSIX_FILE="vsix/ai-skeleton-extension-${VERSION}.vsix"
+          
+          npx @vscode/vsce publish --pre-release --packagePath "$VSIX_FILE"
+          
+          echo "✅ Published pre-release v${VERSION} to VS Code Marketplace"

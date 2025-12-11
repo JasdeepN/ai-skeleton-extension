@@ -57,7 +57,8 @@ export class MemoryTreeProvider implements vscode.TreeDataProvider<MemoryTreeIte
     }
 
     // Root level - show AI-Memory status and files
-    const state = await this.memoryService.detectMemoryBank();
+    // Use cached state instead of re-detecting on every refresh
+    const state = this.memoryService.state;
 
     if (!state.active || !state.path) {
       // AI-Memory not found
@@ -71,7 +72,7 @@ export class MemoryTreeProvider implements vscode.TreeDataProvider<MemoryTreeIte
       ];
     }
 
-    // AI-Memory is active - show files
+    // AI-Memory is active - show database info
     const items: MemoryTreeItem[] = [
       new MemoryTreeItem(
         'AI-Memory: ACTIVE',
@@ -81,25 +82,26 @@ export class MemoryTreeProvider implements vscode.TreeDataProvider<MemoryTreeIte
       )
     ];
 
-    // Add file items (consolidated to 5 essential files)
-    const fileConfigs = [
-      { name: 'activeContext.md', label: 'Active Context', exists: state.files.activeContext },
-      { name: 'progress.md', label: 'Progress', exists: state.files.progress },
-      { name: 'decisionLog.md', label: 'Decision Log', exists: state.files.decisionLog },
-      { name: 'systemPatterns.md', label: 'System Patterns', exists: state.files.systemPatterns },
-      { name: 'projectBrief.md', label: 'Project Brief', exists: state.files.projectBrief },
-    ];
+    // Show database backend
+    const backendItem = new MemoryTreeItem(
+      `Backend: ${state.backend || 'none'}`,
+      vscode.TreeItemCollapsibleState.None,
+      undefined,
+      undefined
+    );
+    backendItem.iconPath = new vscode.ThemeIcon('database');
+    items.push(backendItem);
 
-    for (const config of fileConfigs) {
-      if (config.exists) {
-        const uri = vscode.Uri.joinPath(state.path, config.name);
-        items.push(new MemoryTreeItem(
-          config.label,
-          vscode.TreeItemCollapsibleState.None,
-          uri,
-          config.name
-        ));
-      }
+    // Show database file if available
+    if (state.dbPath) {
+      const dbItem = new MemoryTreeItem(
+        'memory.db',
+        vscode.TreeItemCollapsibleState.None,
+        vscode.Uri.file(state.dbPath),
+        'SQLite Database'
+      );
+      dbItem.iconPath = new vscode.ThemeIcon('file-binary');
+      items.push(dbItem);
     }
 
     return items;

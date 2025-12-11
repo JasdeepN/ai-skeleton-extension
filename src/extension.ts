@@ -3,13 +3,20 @@ import { getPrompts, Prompt } from './promptStore';
 import { getAgents, AgentTemplate, getProtectedFilesEmbedded } from './agentStore';
 import { PromptTreeProvider } from './treeProvider';
 import { getMemoryService } from './memoryService';
+import { getMemoryStore } from './memoryStore';
 import { registerMemoryTools } from './memoryTools';
 import { registerMemoryTreeView } from './memoryTreeProvider';
+import { registerMemoryDashboardView } from './memoryDashboardProvider';
 import { registerMCPTreeView } from './mcpTreeProvider';
 import { getMCPConfigString, getMCPServerList } from './mcpStore';
 import { registerDiagnosticsView } from './diagnosticsProvider';
 import { maybeAutoStartMCPs, startMCPServers } from './mcpManager';
 import { showSetupDialog, checkForUpdates, reinstallAll } from './setupService';
+import { TokenCounterService } from './tokenCounterService';
+import { getMetricsService } from './metricsService';
+import { createChatParticipant } from './chatParticipant';
+import { logger } from './logger';
+import { MemoryEntryViewerProvider } from './memoryEntryViewer';
 
 async function resolvePrompts(): Promise<Prompt[]> {
   const source = vscode.workspace.getConfiguration().get<'auto'|'embedded'|'workspace'>('aiSkeleton.prompts.source', 'auto');
@@ -36,39 +43,163 @@ export async function activate(context: vscode.ExtensionContext) {
   // Show unified setup dialog if components are missing (only on first time)
   // Skip in test environments to avoid dialog errors
   if (!isTestEnvironment) {
-    await showSetupDialog(context);
+    try {
+      await showSetupDialog(context);
+    } catch (err) {
+      logger.warn('[Extension] Setup dialog failed, continuing without blocking activation:', err);
+    }
 
     // Check for updates to installed components (only if user hasn't dismissed update prompts)
-    const updateDismissedVersion = context.workspaceState.get<string>('aiSkeleton.updateDismissedVersion', '');
-    const currentVersion = vscode.extensions.getExtension('jasdeepn.ai-skeleton-extension')?.packageJSON?.version || '0.0.0';
-    
-    const hasUpdates = await checkForUpdates(context);
-    if (hasUpdates && updateDismissedVersion !== currentVersion) {
-      const action = await vscode.window.showInformationMessage(
-        '🔄 AI Skeleton has new component definitions. Merge updates while preserving your customizations?',
-        { modal: false },
-        'Merge Updates',
-        'Later'
-      );
-      if (action === 'Merge Updates') {
-        await reinstallAll(context);
-      } else {
-        // User chose "Later" or dismissed - remember for this version
-        await context.workspaceState.update('aiSkeleton.updateDismissedVersion', currentVersion);
+    try {
+      const updateDismissedVersion = context.workspaceState.get<string>('aiSkeleton.updateDismissedVersion', '');
+      const currentVersion = vscode.extensions.getExtension('jasdeepn.ai-skeleton-extension')?.packageJSON?.version || '0.0.0';
+      
+      const hasUpdates = await checkForUpdates(context);
+      if (hasUpdates && updateDismissedVersion !== currentVersion) {
+        const action = await vscode.window.showInformationMessage(
+          '🔄 AI Skeleton has new component definitions. Merge updates while preserving your customizations?',
+          { modal: false },
+          'Merge Updates',
+          'Later'
+        );
+        if (action === 'Merge Updates') {
+          await reinstallAll(context);
+        } else {
+          // User chose "Later" or dismissed - remember for this version
+          await context.workspaceState.update('aiSkeleton.updateDismissedVersion', currentVersion);
+        }
       }
+    } catch (err) {
+      logger.warn('[Extension] Update check skipped, continuing activation:', err);
     }
   }
 
   // Re-detect memory after potential setup
   await memoryService.detectMemoryBank();
 
+  // Quick startup check: if entries exist but lack embeddings, prompt user to sync
+  const runEmbeddingCoverageCheck = async () => {
+    try {
+      // Skip in tests to avoid modal interference
+      if (isTestEnvironment) return;
+
+      const state = await memoryService.detectMemoryBank();
+      if (!state.active) return;
+
+      const memoryStore = getMemoryStore();
+      const counts = await memoryStore.getEntryCounts();
+      const totalEntries = Object.values(counts).reduce((sum, n) => sum + n, 0);
+      if (totalEntries === 0) return;
+
+      const embeddedCount = await memoryStore.countEntriesWithEmbeddings();
+      const missing = totalEntries - embeddedCount;
+      if (missing <= 0) return;
+
+      const currentVersion = vscode.extensions.getExtension('jasdeepn.ai-skeleton-extension')?.packageJSON?.version || '0.0.0';
+      const dismissedForVersion = context.workspaceState.get<string>('aiSkeleton.embeddingCoverageDismissedVersion', '');
+      if (dismissedForVersion === currentVersion) return;
+
+      const action = await vscode.window.showInformationMessage(
+        `AI-Memory embeddings pending: ${missing}/${totalEntries} entries need vectors. Generate now?`,
+        'Generate embeddings',
+        'Later'
+      );
+
+      if (action === 'Generate embeddings') {
+        await vscode.commands.executeCommand('aiSkeleton.memory.generateEmbeddings');
+      } else if (action === 'Later') {
+        await context.workspaceState.update('aiSkeleton.embeddingCoverageDismissedVersion', currentVersion);
+      }
+    } catch (err) {
+      logger.warn('[Extension] Embedding coverage check skipped:', err);
+    }
+  };
+
+  runEmbeddingCoverageCheck();
+
+  // Initialize token counter service with LRU cache
+  const tokenCounterService = TokenCounterService.getInstance();
+  try {
+    // Wire memoryStore to token counter for metrics persistence
+    const memoryStore = getMemoryStore();
+    tokenCounterService.setMemoryStore(memoryStore);
+    console.log('[Extension] TokenCounterService initialized with metrics persistence');
+  } catch (err) {
+    console.warn('[Extension] TokenCounterService initialization warning:', err);
+  }
+
+  // Agent call middleware for token tracking
+  const agentCallMiddleware = async (agentId: string, systemPrompt: string, messages: Array<{ role: 'user' | 'assistant'; content: string }>, modelName: string = 'claude-3-5-sonnet') => {
+    try {
+      // Count tokens for the agent call
+      const tokenResult = await tokenCounterService.countTokens({
+        model: modelName,
+        systemPrompt,
+        messages
+      });
+
+      // Calculate context budget
+      const contextBudget = tokenCounterService.getContextBudget(tokenResult.totalTokens);
+
+      // Log token metric to memoryStore
+      const memoryStore = getMemoryStore();
+      await memoryStore.logTokenMetric({
+        timestamp: new Date().toISOString(),
+        model: modelName,
+        input_tokens: tokenResult.inputTokens,
+        output_tokens: tokenResult.outputTokens,
+        total_tokens: tokenResult.totalTokens,
+        context_status: contextBudget.status
+      });
+
+      console.log(`[AgentCallMiddleware] Agent: ${agentId}, Status: ${contextBudget.status}, Remaining: ${contextBudget.remaining}K tokens`);
+
+      return {
+        totalTokens: tokenResult.totalTokens,
+        budget: contextBudget,
+        cached: tokenResult.cached
+      };
+    } catch (err) {
+      console.error('[AgentCallMiddleware] Error tracking agent call:', err);
+      // Return a default safe budget on error
+      return {
+        totalTokens: 0,
+        budget: tokenCounterService.getContextBudget(0),
+        cached: false
+      };
+    }
+  };
+
+  // Store middleware globally so memoryTools can access it for tool invocations
+  // This allows tools to track token usage when invoked by agents
+  (global as any).__agentCallMiddleware = agentCallMiddleware;
+
   // Register memory LM tools (for Copilot agent integration)
   // Uses VS Code Language Model Tools API (stable in VS Code 1.95+)
   // Commands below provide manual/programmatic alternatives
   registerMemoryTools(context);
 
+  // Register @aiSkeleton chat participant for guaranteed tool invocation
+  // This participant controls the tool calling loop and ensures tokens are tracked
+  try {
+    // Debug: Check if chat API is available
+    const chatApiAvailable = !!(vscode.chat && vscode.chat.createChatParticipant);
+    console.log('[Extension] Chat API available:', chatApiAvailable);
+    console.log('[Extension] vscode.chat:', !!vscode.chat);
+    console.log('[Extension] vscode.chat.createChatParticipant:', !!vscode.chat?.createChatParticipant);
+    
+    createChatParticipant(context);
+    console.log('[Extension] @aiSkeleton chat participant registered');
+  } catch (err) {
+    console.error('[Extension] Failed to register chat participant:', err);
+    console.error('[Extension] Error details:', err instanceof Error ? err.message : String(err));
+  }
+
   // Register memory tree view
   const { treeView: memoryTreeView, provider: memoryTreeProvider } = registerMemoryTreeView(context);
+
+  // Register memory dashboard (Activity Bar)
+  const { treeView: memoryDashboardView, provider: memoryDashboardProvider } = registerMemoryDashboardView(context);
 
   // Register MCP tree view
   const { treeView: mcpTreeView, provider: mcpTreeProvider } = registerMCPTreeView(context);
@@ -107,6 +238,66 @@ export async function activate(context: vscode.ExtensionContext) {
   updateMemoryStatus();
   memoryStatusBar.show();
   context.subscriptions.push(memoryStatusBar);
+
+  // Context budget status bar - displays token usage and remaining budget
+  const contextBudgetStatusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 8);
+  contextBudgetStatusBar.command = 'aiSkeleton.context.showUsage';
+
+  const metricsService = getMetricsService();
+  const CONTEXT_WINDOW = 200_000; // Default context window
+
+  const formatTokens = (value: number) => {
+    if (value >= 1000) {
+      const normalized = value / 1000;
+      return `${normalized >= 100 ? normalized.toFixed(0) : normalized.toFixed(1)}K`;
+    }
+    return `${value}`;
+  };
+
+  const updateContextBudget = async () => {
+    try {
+      const latestMetric = await metricsService.getLatestTokenMetric();
+      const usedTokens = latestMetric?.total_tokens ?? 0;
+      const budget = tokenCounterService.getContextBudget(usedTokens, CONTEXT_WINDOW);
+
+      const statusIcon: Record<typeof budget.status, string> = {
+        healthy: '$(check)',
+        warning: '$(alert)',
+        critical: '$(flame)'
+      };
+
+      contextBudgetStatusBar.text = `${statusIcon[budget.status]} Ctx ${formatTokens(budget.remaining)} / ${formatTokens(budget.total)} left`;
+      contextBudgetStatusBar.tooltip = [
+        `Context status: ${budget.status.toUpperCase()}`,
+        `Used: ${formatTokens(budget.used)} / ${formatTokens(budget.total)} (${budget.percentUsed.toFixed(1)}%)`,
+        `Remaining: ${formatTokens(budget.remaining)}`,
+        budget.recommendations.join('\n')
+      ].join('\n');
+
+      if (budget.status === 'critical') {
+        contextBudgetStatusBar.backgroundColor = new vscode.ThemeColor('statusBarItem.errorBackground');
+      } else if (budget.status === 'warning') {
+        contextBudgetStatusBar.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');
+      } else {
+        contextBudgetStatusBar.backgroundColor = undefined;
+      }
+    } catch (err) {
+      console.error('[Extension] Failed to update context budget status bar:', err);
+      contextBudgetStatusBar.text = '$(pie-chart) Budget: Unknown';
+      contextBudgetStatusBar.tooltip = 'Unable to retrieve context budget. See logs for details.';
+      contextBudgetStatusBar.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');
+    }
+  };
+
+  updateContextBudget();
+  contextBudgetStatusBar.show();
+  context.subscriptions.push(contextBudgetStatusBar);
+
+  // Update budget status bar periodically
+  const budgetUpdateInterval = setInterval(() => {
+    void updateContextBudget();
+  }, 5000);
+  context.subscriptions.push({ dispose: () => clearInterval(budgetUpdateInterval) });
 
   // Listen for memory state changes
   memoryService.onDidChangeState(() => {
@@ -599,12 +790,9 @@ export async function activate(context: vscode.ExtensionContext) {
       if (!pick || pick === 'Cancel') { vscode.window.showInformationMessage('Install-all canceled.'); return; }
       promptOverwrite = pick === 'Overwrite All' ? 'overwrite' : 'skip';
     }
+    // Always overwrite agent files - they are templates from the extension, not user-modified
+    // Use the UI command with --keep-local flag if you want to preserve existing files
     let agentOverwrite: 'overwrite'|'skip'|'cancel' = 'overwrite';
-    if (existingAgents.length) {
-      const pick = await vscode.window.showInformationMessage(`.github/agents already has ${existingAgents.length} file(s). Overwrite?`, 'Overwrite All', 'Skip existing', 'Cancel');
-      if (!pick || pick === 'Cancel') { vscode.window.showInformationMessage('Install-all canceled.'); return; }
-      agentOverwrite = pick === 'Overwrite All' ? 'overwrite' : 'skip';
-    }
 
     const confirmProtected = await vscode.window.showWarningMessage('Install protected files (.copilotignore, PROTECTED_FILES.md) into .github? These define agent behavior.', 'Yes, proceed', 'Cancel');
     if (!confirmProtected || confirmProtected === 'Cancel') { vscode.window.showInformationMessage('Install-all canceled (protected files).'); return; }
@@ -645,7 +833,6 @@ export async function activate(context: vscode.ExtensionContext) {
       for (const a of agentsToInstall) {
         const target = vscode.Uri.joinPath(destAgents, a.filename);
         let exists = false; try { await vscode.workspace.fs.stat(target); exists = true; } catch {}
-        if (exists && agentOverwrite === 'skip') { skippedAgents++; tick('Agents'); continue; }
         try { await vscode.workspace.fs.writeFile(target, encode(a.content)); writtenAgents++; } catch (e) { console.error(e); }
         tick('Agents');
       }
@@ -793,6 +980,65 @@ export async function activate(context: vscode.ExtensionContext) {
   // ========================================
 
   // Show memory status
+  // Show context usage breakdown by tool
+  context.subscriptions.push(vscode.commands.registerCommand('aiSkeleton.context.showUsage', async () => {
+    try {
+      const toolMetrics = await metricsService.getToolMetrics(7);
+      const latestMetric = await metricsService.getLatestTokenMetric();
+      
+      if (Object.keys(toolMetrics).length === 0) {
+        vscode.window.showInformationMessage(
+          'No token usage data available yet. Token tracking starts after using LM tools.',
+          'OK'
+        );
+        return;
+      }
+
+      // Sort tools by total tokens (highest first)
+      const sorted = Object.entries(toolMetrics)
+        .sort(([, a], [, b]) => b.totalTokens - a.totalTokens);
+
+      const lines: string[] = [
+        '📊 Token Usage by Tool (Last 7 Days)',
+        '═'.repeat(50),
+        ''
+      ];
+
+      let grandTotal = 0;
+      let grandCalls = 0;
+
+      for (const [tool, stats] of sorted) {
+        const percentage = latestMetric?.total_tokens 
+          ? ((stats.totalTokens / latestMetric.total_tokens) * 100).toFixed(1)
+          : '0.0';
+        
+        lines.push(
+          `${tool}:`,
+          `  Calls: ${stats.count}`,
+          `  Total: ${formatTokens(stats.totalTokens)} tokens`,
+          `  Average: ${formatTokens(stats.averageTokens)} tokens/call`,
+          ''
+        );
+        
+        grandTotal += stats.totalTokens;
+        grandCalls += stats.count;
+      }
+
+      lines.push(
+        '─'.repeat(50),
+        `Total: ${grandCalls} calls, ${formatTokens(grandTotal)} tokens`,
+        `Current Budget: ${latestMetric?.total_tokens ? formatTokens(latestMetric.total_tokens) : 'N/A'} used`
+      );
+
+      const panel = vscode.window.createOutputChannel('AI Skeleton: Token Usage', { log: true });
+      panel.clear();
+      panel.appendLine(lines.join('\n'));
+      panel.show();
+    } catch (err) {
+      vscode.window.showErrorMessage(`Failed to retrieve token usage: ${err}`);
+    }
+  }));
+
   context.subscriptions.push(vscode.commands.registerCommand('aiSkeleton.memory.showStatus', async () => {
     const state = memoryService.state;
     if (state.active) {
@@ -813,6 +1059,139 @@ export async function activate(context: vscode.ExtensionContext) {
       if (action === 'Create Memory Bank') {
         await vscode.commands.executeCommand('aiSkeleton.memory.create');
       }
+    }
+  }));
+
+  // Clear current context
+  context.subscriptions.push(vscode.commands.registerCommand('aiSkeleton.context.clear', async () => {
+    const confirmed = await vscode.window.showWarningMessage(
+      'Clear current context?',
+      { modal: true },
+      'Yes'
+    );
+    if (confirmed === 'Yes') {
+      try {
+        const memoryStore = getMemoryStore();
+        // Query for current CONTEXT entry and mark as deprecated
+        const result = await memoryStore.queryByType('CONTEXT', 1);
+        if (result.entries && result.entries.length > 0) {
+          // Create deprecated entry to mark context as cleared
+          await memoryStore.appendEntry({
+            file_type: 'CONTEXT',
+            timestamp: new Date().toISOString(),
+            tag: `[CONTEXT:${new Date().toISOString().split('T')[0]}] Context Cleared`,
+            content: 'Context has been cleared. Ready for new task.',
+            progress_status: 'deprecated'
+          });
+        }
+        vscode.window.showInformationMessage('Context cleared');
+        memoryDashboardProvider.refresh();
+      } catch (err) {
+        vscode.window.showErrorMessage(`Failed to clear context: ${err}`);
+      }
+    }
+  }));
+
+  // Open context in editor
+  context.subscriptions.push(vscode.commands.registerCommand('aiSkeleton.context.open', async (content: string, tag: string) => {
+    try {
+      // Create an untitled document with the context content
+      const doc = await vscode.workspace.openTextDocument({
+        language: 'markdown',
+        content: `# ${tag}\n\n${content}`
+      });
+      
+      // Open in editor as preview (read-only)
+      await vscode.window.showTextDocument(doc, {
+        preview: true,
+        preserveFocus: false
+      });
+    } catch (err) {
+      vscode.window.showErrorMessage(`Failed to open context: ${err}`);
+    }
+  }));
+
+  // View memory file (Decision Log, Context, Progress, Patterns, Brief)
+  context.subscriptions.push(vscode.commands.registerCommand('aiSkeleton.memory.viewFile', async (fileType: string) => {
+    try {
+      const memoryService = getMemoryService();
+      const entries = await memoryService.queryByType(fileType as any);
+      
+      if (entries.length === 0) {
+        vscode.window.showWarningMessage(`No entries found in ${fileType}`);
+        return;
+      }
+
+      // Format all entries with timestamps and tags
+      const fileTypeLabel = {
+        'DECISION': 'Decision Log',
+        'CONTEXT': 'Context History',
+        'PROGRESS': 'Progress Tracking',
+        'PATTERN': 'System Patterns',
+        'BRIEF': 'Project Brief'
+      }[fileType] || fileType;
+
+      // Build markdown content showing all entries
+      let content = `# ${fileTypeLabel}\n\n**Total entries: ${entries.length}**\n\n`;
+      
+      // Sort by timestamp descending (newest first)
+      const sorted = [...entries].sort((a, b) => {
+        const aTime = new Date(a.timestamp || 0).getTime();
+        const bTime = new Date(b.timestamp || 0).getTime();
+        return bTime - aTime;
+      });
+
+      for (const entry of sorted) {
+        const tag = (entry as any).tag ? ` - ${(entry as any).tag}` : '';
+        const date = entry.timestamp ? new Date(entry.timestamp).toLocaleDateString() : 'Unknown';
+        content += `## ${date}${tag}\n\n${entry.content}\n\n---\n\n`;
+      }
+
+      // Open in editor as preview (read-only)
+      const doc = await vscode.workspace.openTextDocument({
+        language: 'markdown',
+        content
+      });
+      
+      await vscode.window.showTextDocument(doc, {
+        preview: true,
+        preserveFocus: false
+      });
+    } catch (err) {
+      vscode.window.showErrorMessage(`Failed to open memory file: ${err}`);
+    }
+  }));
+
+  // Start new task / context
+  context.subscriptions.push(vscode.commands.registerCommand('aiSkeleton.context.newTask', async () => {
+    const task = await vscode.window.showInputBox({
+      prompt: 'Enter new task/context description',
+      placeHolder: 'E.g., Implement feature X, Debug issue Y, etc.',
+      ignoreFocusOut: true
+    });
+
+    if (!task || !task.trim()) {
+      return;
+    }
+
+    try {
+      const memoryStore = getMemoryStore();
+      const today = new Date().toISOString().split('T')[0];
+      const timestamp = new Date().toISOString();
+      
+      await memoryStore.appendEntry({
+        file_type: 'CONTEXT',
+        timestamp,
+        tag: `[TASK:${today}] ${task.trim()}`,
+        content: `Starting new task: ${task.trim()}\n\nInitial phase: research`,
+        phase: 'research',
+        progress_status: 'in-progress'
+      });
+
+      vscode.window.showInformationMessage(`New task created: ${task.trim()}`);
+      memoryDashboardProvider.refresh();
+    } catch (err) {
+      vscode.window.showErrorMessage(`Failed to create task: ${err}`);
     }
   }));
 
@@ -957,6 +1336,103 @@ export async function activate(context: vscode.ExtensionContext) {
     }
   }));
 
+  // Generate embeddings for all entries (background indexing)
+  context.subscriptions.push(vscode.commands.registerCommand('aiSkeleton.memory.generateEmbeddings', async () => {
+    const state = await memoryService.detectMemoryBank();
+    if (!state.active) {
+      vscode.window.showWarningMessage('AI-Memory not active. Create one first.');
+      return;
+    }
+
+    logger.info('[Embeddings] Starting full embedding generation for all entries');
+    await vscode.window.withProgress({
+      location: vscode.ProgressLocation.Notification,
+      title: 'Generating embeddings for memory entries',
+      cancellable: false
+    }, async (progress) => {
+      try {
+        const memoryStore = getMemoryStore();
+        
+        // Get all entries
+        const allTypes: ('CONTEXT' | 'DECISION' | 'PROGRESS' | 'PATTERN' | 'BRIEF')[] = ['CONTEXT', 'DECISION', 'PROGRESS', 'PATTERN', 'BRIEF'];
+        let allEntries: any[] = [];
+        
+        for (const type of allTypes) {
+          const result = await memoryStore.queryByType(type, 1000);
+          allEntries = allEntries.concat(result.entries);
+        }
+
+        const total = allEntries.length;
+        progress.report({ increment: 0, message: `Found ${total} entries` });
+
+        // Filter entries that don't have embeddings
+        const entriesWithEmbeddings = await memoryStore.queryEntriesWithEmbeddings(10000);
+        const idsWithEmbeddings = new Set(entriesWithEmbeddings.map(e => e.id));
+        const entriesNeedingEmbeddings = allEntries.filter(e => !idsWithEmbeddings.has(e.id));
+
+        if (entriesNeedingEmbeddings.length === 0) {
+          vscode.window.showInformationMessage('All entries already have embeddings!');
+          return;
+        }
+
+        progress.report({ message: `Generating embeddings for ${entriesNeedingEmbeddings.length} entries...` });
+
+        // Generate embeddings with progress updates
+        const { getEmbeddingService, quantizeEmbedding } = await import('./embeddingService');
+        const embeddingService = getEmbeddingService();
+        
+        let processed = 0;
+        let failed = 0;
+        let skipped = 0;
+        for (const entry of entriesNeedingEmbeddings) {
+          try {
+            const content = typeof entry.content === 'string' ? entry.content : '';
+            if (!content.trim()) {
+              skipped++;
+              logger.warn(`[Embeddings] Skipping empty entry ${entry.id}`);
+              continue;
+            }
+
+            const result = await embeddingService.embed(content);
+            const quantized = quantizeEmbedding(result.embedding);
+            const buffer = Buffer.from(quantized);
+
+            // Update the entry with the embedding
+            if (memoryStore.backend === 'better-sqlite3') {
+              const stmt = (memoryStore as any).db.prepare(`UPDATE entries SET embedding = ? WHERE id = ?`);
+              stmt.run(buffer, entry.id);
+            } else if (memoryStore.backend === 'sql.js') {
+              (memoryStore as any).db.run(`UPDATE entries SET embedding = ? WHERE id = ?`, [buffer, entry.id]);
+              await (memoryStore as any).persistSqlJs();
+            }
+
+            processed++;
+            const percentage = Math.round((processed / entriesNeedingEmbeddings.length) * 100);
+            progress.report({ 
+              increment: 100 / entriesNeedingEmbeddings.length,
+              message: `${processed}/${entriesNeedingEmbeddings.length} (${percentage}%)`
+            });
+          } catch (err: any) {
+            const message = err?.message || String(err);
+            logger.error(`[Embeddings] Failed to generate embedding for entry ${entry.id}: ${message}`, err?.stack || err);
+            failed++;
+          }
+        }
+
+        if (failed > 0) {
+          logger.warn(`[Embeddings] Completed with failures. Processed ${processed}/${entriesNeedingEmbeddings.length}, failed ${failed}, skipped ${skipped}.`);
+          vscode.window.showWarningMessage(`Generated embeddings for ${processed}/${entriesNeedingEmbeddings.length} (skipped ${skipped}, failed ${failed}). See Output: AI Skeleton for details.`);
+        } else {
+          logger.info(`[Embeddings] Successfully generated embeddings for ${processed}/${entriesNeedingEmbeddings.length} entries (skipped ${skipped}).`);
+          vscode.window.showInformationMessage(`Successfully generated embeddings for ${processed}/${entriesNeedingEmbeddings.length} entries (skipped ${skipped}).`);
+        }
+      } catch (err) {
+        logger.error('[Embeddings] Fatal error during generation:', err);
+        vscode.window.showErrorMessage(`Failed to generate embeddings. See Output: AI Skeleton for details.`);
+      }
+    });
+  }));
+
   // Generic memory update command (accepts context, progress, or pattern updates)
   context.subscriptions.push(vscode.commands.registerCommand('aiSkeleton.memory.update', async (entry?: any) => {
     if (!entry) {
@@ -1007,6 +1483,154 @@ export async function activate(context: vscode.ExtensionContext) {
     await reload();
     provider.refresh();
     vscode.window.showInformationMessage('Prompts tree refreshed');
+  }));
+
+  // Export research report from RESEARCH phase entries
+  context.subscriptions.push(vscode.commands.registerCommand('aiSkeleton.memory.exportResearchReport', async () => {
+    try {
+      const success = await memoryService.savePhaseReport('research');
+      if (success) {
+        vscode.window.showInformationMessage('✓ Research report exported successfully');
+      } else {
+        vscode.window.showWarningMessage('No research entries found to export');
+      }
+    } catch (err) {
+      vscode.window.showErrorMessage(`Failed to export research report: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }));
+
+  // Export plan report from PLANNING phase entries
+  context.subscriptions.push(vscode.commands.registerCommand('aiSkeleton.memory.exportPlanReport', async () => {
+    try {
+      const success = await memoryService.savePhaseReport('planning');
+      if (success) {
+        vscode.window.showInformationMessage('✓ Plan report exported successfully');
+      } else {
+        vscode.window.showWarningMessage('No planning entries found to export');
+      }
+    } catch (err) {
+      vscode.window.showErrorMessage(`Failed to export plan report: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }));
+
+  // Export execution report from EXECUTION phase entries
+  context.subscriptions.push(vscode.commands.registerCommand('aiSkeleton.memory.exportExecutionReport', async () => {
+    try {
+      const success = await memoryService.savePhaseReport('execution');
+      if (success) {
+        vscode.window.showInformationMessage('✓ Execution report exported successfully');
+      } else {
+        vscode.window.showWarningMessage('No execution entries found to export');
+      }
+    } catch (err) {
+      vscode.window.showErrorMessage(`Failed to export execution report: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }));
+
+  // Export all phase reports (research, plan, execution)
+  context.subscriptions.push(vscode.commands.registerCommand('aiSkeleton.memory.exportAllReports', async () => {
+    try {
+      const success = await memoryService.saveAllPhaseReports();
+      if (success) {
+        vscode.window.showInformationMessage('✓ All phase reports exported successfully');
+      } else {
+        vscode.window.showWarningMessage('Some reports may have failed. Check the AI-Memory folder.');
+      }
+    } catch (err) {
+      vscode.window.showErrorMessage(`Failed to export reports: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }));
+
+  // Open memory entry command (from dashboard tree) - shows in single editor tab
+  const memoryViewerProvider = new MemoryEntryViewerProvider(memoryService);
+  context.subscriptions.push(
+    vscode.workspace.registerTextDocumentContentProvider('aiSkeleton-memory', memoryViewerProvider)
+  );
+
+  const openMemoryEntryCommands = [
+    'aiSkeleton.openMemoryEntry',
+    // Alias for forward compatibility if command id changes in menus/tests
+    'aiSkeleton.memory.openEntry'
+  ];
+
+  const openMemoryEntryHandler = async (entryId?: number, entryTag?: string) => {
+    if (!entryId) {
+      vscode.window.showErrorMessage('No entry ID provided');
+      return;
+    }
+
+    try {
+      // Update the viewer to show this entry
+      memoryViewerProvider.setCurrentEntry(entryId);
+
+      // Open/focus the single persistent editor
+      const uri = vscode.Uri.parse(`aiSkeleton-memory://memory-entry/${entryId}`);
+      const doc = await vscode.workspace.openTextDocument(uri);
+      
+      // Show in editor (non-preview so it persists and can be re-used)
+      await vscode.window.showTextDocument(doc, { 
+        preview: false,
+        preserveFocus: false,
+        viewColumn: vscode.ViewColumn.Beside
+      });
+    } catch (error) {
+      console.error('[Extension] Error opening memory entry:', error);
+      vscode.window.showErrorMessage(`Failed to open entry: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  };
+
+  openMemoryEntryCommands.forEach(commandId => {
+    context.subscriptions.push(vscode.commands.registerCommand(commandId, openMemoryEntryHandler));
+  });
+
+  // Copy memory entry content to clipboard
+  context.subscriptions.push(vscode.commands.registerCommand('aiSkeleton.copyMemoryEntry', async (item: any) => {
+    const entryId = item?.meta?.entryId;
+    if (!entryId) {
+      vscode.window.showErrorMessage('No entry ID provided');
+      return;
+    }
+
+    try {
+      const entry = await memoryService.getStore().getEntryById(entryId);
+      if (!entry) {
+        vscode.window.showErrorMessage(`Entry not found (ID: ${entryId})`);
+        return;
+      }
+
+      await vscode.env.clipboard.writeText(entry.content);
+      vscode.window.showInformationMessage(`Copied "${entry.tag}" to clipboard`);
+    } catch (error) {
+      console.error('[Extension] Error copying memory entry:', error);
+      vscode.window.showErrorMessage(`Failed to copy entry: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }));
+
+  // Reference memory entry in current context
+  context.subscriptions.push(vscode.commands.registerCommand('aiSkeleton.referenceInContext', async (item: any) => {
+    const entryId = item?.meta?.entryId;
+    if (!entryId) {
+      vscode.window.showErrorMessage('No entry ID provided');
+      return;
+    }
+
+    try {
+      const entry = await memoryService.getStore().getEntryById(entryId);
+      if (!entry) {
+        vscode.window.showErrorMessage(`Entry not found (ID: ${entryId})`);
+        return;
+      }
+
+      // Create reference with preview of content
+      const preview = entry.content.substring(0, 300).replace(/\n/g, ' ');
+      const reference = `\n\n## Reference: ${entry.tag}\n**Type:** ${entry.file_type} | **ID:** ${entryId} | **Date:** ${entry.timestamp.split('T')[0]}\n\n${preview}${entry.content.length > 300 ? '...' : ''}\n\n[Full content available in Memory Entries tree]\n`;
+      
+      await memoryService.updateContext(reference);
+      vscode.window.showInformationMessage(`Referenced "${entry.tag}" in current context`);
+    } catch (error) {
+      console.error('[Extension] Error referencing memory entry:', error);
+      vscode.window.showErrorMessage(`Failed to reference entry: ${error instanceof Error ? error.message : String(error)}`);
+    }
   }));
 
   // React to configuration changes

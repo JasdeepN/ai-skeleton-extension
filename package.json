@@ -2,7 +2,7 @@
   "name": "ai-skeleton-extension",
   "displayName": "AI Skeleton Prompts & Memory",
   "description": "Complete AI agent toolkit: Native memory management (AI-Memory), workflow prompts, MCP integration, and agent definitions.",
-  "version": "0.1.29",
+  "version": "0.2.6",
   "publisher": "JasdeepN",
   "license": "SEE LICENSE IN LICENSE",
   "repository": {
@@ -16,10 +16,37 @@
     "Other"
   ],
   "activationEvents": [
-    "onStartupFinished"
+    "onStartupFinished",
+    "onLanguageModelTool:aiSkeleton_showMemory",
+    "onLanguageModelTool:aiSkeleton_logDecision",
+    "onLanguageModelTool:aiSkeleton_updateContext",
+    "onLanguageModelTool:aiSkeleton_updateProgress",
+    "onLanguageModelTool:aiSkeleton_updatePatterns",
+    "onLanguageModelTool:aiSkeleton_markDeprecated",
+    "onLanguageModelTool:aiSkeleton_updateProjectBrief",
+    "onLanguageModelTool:aiSkeleton_saveResearch",
+    "onLanguageModelTool:aiSkeleton_savePlan",
+    "onLanguageModelTool:aiSkeleton_saveExecution",
+    "onLanguageModelTool:aiSkeleton_editEntry",
+    "onLanguageModelTool:aiSkeleton_appendToEntry",
+    "onChatParticipant:aiSkeleton",
+    "onView:aiSkeletonPromptsView",
+    "onView:aiSkeletonMemoryView",
+    "onView:aiSkeletonDiagnosticsView",
+    "onView:aiSkeletonMCPView"
   ],
-  "main": "./dist/src/extension.js",
+  "main": "./dist/extension.js",
+  "capabilities": {
+    "chatParticipant": true
+  },
   "contributes": {
+    "chatParticipants": [
+      {
+        "id": "aiSkeleton",
+        "name": "aiSkeleton",
+        "description": "Memory-aware AI assistant with access to your project's decision log, context, and patterns"
+      }
+    ],
     "configuration": {
       "properties": {
         "aiSkeleton.prompts.source": {
@@ -51,6 +78,24 @@
           "type": "boolean",
           "default": false,
           "description": "Automatically start MCP servers defined in .vscode/mcp.json on startup. Prompts on first run."
+        },
+        "aiSkeleton.mcp.priority": {
+          "type": "string",
+          "enum": [
+            "mcp",
+            "extension",
+            "mixed"
+          ],
+          "default": "mcp",
+          "description": "Tool priority order for the unified registry. mcp = MCP tools first (default), extension = extension tools first, mixed = interleave sources."
+        },
+        "aiSkeleton.restrictions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "List of tool names/globs/regex patterns to block from the unified registry (applied before exposing tools to the model)."
         }
       }
     },
@@ -113,8 +158,28 @@
       },
       {
         "command": "aiSkeleton.memory.dump",
-        "title": "AI Skeleton: Dump Memory to Markdown",
-        "icon": "$(export)"
+        "title": "Export Memory Reports",
+        "category": "AI-Memory"
+      },
+      {
+        "command": "aiSkeleton.copyMemoryEntry",
+        "title": "Copy Content",
+        "category": "AI-Memory"
+      },
+      {
+        "command": "aiSkeleton.referenceInContext",
+        "title": "Reference in Context",
+        "category": "AI-Memory"
+      },
+      {
+        "command": "aiSkeleton.openMemoryEntry",
+        "title": "Open Memory Entry",
+        "category": "AI-Memory"
+      },
+      {
+        "command": "aiSkeleton.memory.generateEmbeddings",
+        "title": "AI Skeleton: Generate Embeddings for All Entries",
+        "icon": "$(sparkle)"
       },
       {
         "command": "aiSkeleton.memory.show",
@@ -135,6 +200,22 @@
       {
         "command": "aiSkeleton.memory.updatePatterns",
         "title": "AI Skeleton: Update System Patterns"
+      },
+      {
+        "command": "aiSkeleton.memory.exportResearchReport",
+        "title": "AI Skeleton: Export Research Report"
+      },
+      {
+        "command": "aiSkeleton.memory.exportPlanReport",
+        "title": "AI Skeleton: Export Plan Report"
+      },
+      {
+        "command": "aiSkeleton.memory.exportExecutionReport",
+        "title": "AI Skeleton: Export Execution Report"
+      },
+      {
+        "command": "aiSkeleton.memory.exportAllReports",
+        "title": "AI Skeleton: Export All Phase Reports"
       },
       {
         "command": "aiSkeleton.memory.refresh",
@@ -170,12 +251,7 @@
         "modelDescription": "Read and display memory bank contents. Use this to retrieve project context, decisions, progress, and patterns. Call this at the start of sessions to understand project state.",
         "inputSchema": {
           "type": "object",
-          "properties": {
-            "file": {
-              "type": "string",
-              "description": "Optional: specific file to read (e.g., 'activeContext.md', 'decisionLog.md')"
-            }
-          }
+          "properties": {}
         },
         "tags": [
           "ai-skeleton",
@@ -213,7 +289,79 @@
         ]
       },
       {
-        "name": "aiSkeleton_updateContext",
+        "name": "aiSkeleton_saveResearch",
+        "displayName": "Save Research",
+        "toolReferenceName": "saveResearch",
+        "icon": "$(telescope)",
+        "userDescription": "Save research findings from Think.prompt.md workflow",
+        "canBeReferencedInPrompt": true,
+        "modelDescription": "Save research findings following Think.prompt.md Research Brief template. Use this for research outputs, NOT updateProjectBrief (which is for overall project goals/scope). SMART: If no content provided, auto-synthesizes report from recent DECISION and CONTEXT entries.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "content": {
+              "type": "string",
+              "description": "Optional: The research brief content following Think.prompt.md template. If not provided, auto-synthesizes from memory entries."
+            }
+          },
+          "required": []
+        },
+        "tags": [
+          "ai-skeleton",
+          "memory",
+          "research"
+        ]
+      },
+      {
+        "name": "aiSkeleton_savePlan",
+        "displayName": "Save Plan",
+        "toolReferenceName": "savePlan",
+        "icon": "$(list-tree)",
+        "userDescription": "Save implementation plan from Plan.prompt.md workflow",
+        "canBeReferencedInPrompt": true,
+        "modelDescription": "Save implementation plan following Plan.prompt.md template. Use this for planning outputs with task breakdowns, NOT updateProjectBrief (which is for overall project goals/scope). SMART: If no content provided, auto-synthesizes report from recent PROGRESS and DECISION entries.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "content": {
+              "type": "string",
+              "description": "Optional: The implementation plan content following Plan.prompt.md template. If not provided, auto-synthesizes from memory entries."
+            }
+          },
+          "required": []
+        },
+        "tags": [
+          "ai-skeleton",
+          "memory",
+          "planning"
+        ]
+      },
+      {
+        "name": "aiSkeleton_saveExecution",
+        "displayName": "Save Execution",
+        "toolReferenceName": "saveExecution",
+        "icon": "$(check-all)",
+        "userDescription": "Save execution summary from Execute.prompt.md workflow",
+        "canBeReferencedInPrompt": true,
+        "modelDescription": "Save execution summary following Execute.prompt.md template. Use this for execution reports and completion summaries, NOT updateProjectBrief (which is for overall project goals/scope). SMART: If no content provided, auto-synthesizes report from recent PROGRESS, DECISION, and CONTEXT entries.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "content": {
+              "type": "string",
+              "description": "Optional: The execution summary content following Execute.prompt.md template. If not provided, auto-synthesizes from memory entries."
+            }
+          },
+          "required": []
+        },
+        "tags": [
+          "ai-skeleton",
+          "memory",
+          "execution"
+        ]
+      },
+      {
+        "name": "aiSkeleton_editEntry",
         "displayName": "Update Context",
         "toolReferenceName": "updateContext",
         "icon": "$(edit)",
@@ -341,13 +489,13 @@
             "file": {
               "type": "string",
               "enum": [
-                "activeContext.md",
-                "decisionLog.md",
-                "progress.md",
-                "systemPatterns.md",
-                "projectBrief.md"
+                "context",
+                "decision",
+                "progress",
+                "patterns",
+                "brief"
               ],
-              "description": "The memory file to update"
+              "description": "The memory type to update (context, decision, progress, patterns, brief)"
             },
             "item": {
               "type": "string",
@@ -382,6 +530,11 @@
     "views": {
       "aiSkeleton": [
         {
+          "id": "aiSkeletonMemoryDashboard",
+          "name": "Memory Dashboard",
+          "icon": "resources/ai-skeleton.svg"
+        },
+        {
           "id": "aiSkeletonDiagnostics",
           "name": "Diagnostics",
           "icon": "resources/ai-skeleton.svg"
@@ -411,24 +564,24 @@
           "command": "aiSkeleton.installPrompt",
           "when": "view == aiSkeletonPrompts && viewItem == promptItem",
           "group": "inline"
+        },
+        {
+          "command": "aiSkeleton.openMemoryEntry",
+          "when": "view == aiSkeletonMemory && viewItem == memory-entry-item",
+          "group": "1_memory@1"
+        },
+        {
+          "command": "aiSkeleton.copyMemoryEntry",
+          "when": "view == aiSkeletonMemory && viewItem == memory-entry-item",
+          "group": "1_memory@2"
+        },
+        {
+          "command": "aiSkeleton.referenceInContext",
+          "when": "view == aiSkeletonMemory && viewItem == memory-entry-item",
+          "group": "2_reference@1"
         }
       ],
       "view/title": [
-        {
-          "command": "aiSkeleton.diagnostics.refresh",
-          "when": "view == aiSkeletonDiagnostics",
-          "group": "navigation"
-        },
-        {
-          "command": "aiSkeleton.diagnostics.runSelfTest",
-          "when": "view == aiSkeletonDiagnostics",
-          "group": "navigation"
-        },
-        {
-          "command": "aiSkeleton.installAll",
-          "when": "view == aiSkeletonDiagnostics",
-          "group": "navigation"
-        },
         {
           "command": "aiSkeleton.installPrompts",
           "when": "view == aiSkeletonPrompts",
@@ -463,17 +616,22 @@
     }
   },
   "scripts": {
+    "sync-tools": "node scripts/sync-agent-tools.js",
     "embed-prompts": "node scripts/embed-prompts.js",
-    "embed-agents": "node scripts/embed-agents.js",
+    "embed-agents": "npm run sync-tools && node scripts/embed-agents.js",
     "embed-all": "npm run embed-prompts && npm run embed-agents",
-    "build": "npm run embed-all && tsc -p .",
+    "vscode:prepublish": "npm run compile-production",
+    "compile-production": "npm run embed-all && webpack --mode production",
+    "build": "npm run embed-all && webpack --mode none",
     "compile": "tsc -p .",
+    "webpack": "webpack --mode none",
+    "webpack-dev": "webpack --mode development --watch",
     "watch": "tsc -w",
     "verify": "node scripts/verify.js",
     "test:verify-embeddings": "node scripts/verify-embeddings.js",
     "test:embeddings": "jest tests/embeddings.test.js",
     "test": "jest",
-    "test:e2e": "tsc -p . && node ./dist/tests/e2e/runTest.js",
+    "test:e2e": "tsc -p . && xvfb-run -a node ./dist/tests/e2e/runTest.js",
     "test:coverage": "c8 npm test",
     "test:encoding": "node scripts/test-save-prompt.js",
     "test:promptstore": "node scripts/test-prompt-store.js",
@@ -489,16 +647,23 @@
     "@types/mocha": "^10.0.10",
     "@types/node": "^20.8.0",
     "@types/vscode": "^1.95.0",
+    "@types/webpack": "^5.28.5",
     "@vscode/test-electron": "^2.5.2",
     "c8": "^10.1.3",
     "glob": "^13.0.0",
     "jest": "^30.2.0",
     "mocha": "^11.7.5",
+    "path-browserify": "^1.0.1",
     "ts-jest": "^29.4.6",
+    "ts-loader": "^9.5.4",
     "typescript": "^5.3.0",
-    "vsce": "^2.15.0"
+    "vsce": "^2.15.0",
+    "webpack": "^5.103.0",
+    "webpack-cli": "^6.0.1"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.28.0",
+    "js-tiktoken": "^1.0.14",
     "minimist": "^1.2.8",
     "sql.js": "^1.12.0"
   }
