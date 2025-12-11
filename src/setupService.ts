@@ -346,7 +346,7 @@ async function installPrompts(context: vscode.ExtensionContext, rootUri: vscode.
     const choice = await vscode.window.showInformationMessage(
       `${updates.length} prompt(s) have updates available. Install the latest versions?`,
       'Update Prompts',
-      'Skip For Now'
+      'Later'
     );
     
     if (choice === 'Update Prompts') {
@@ -391,8 +391,7 @@ async function installAgents(context: vscode.ExtensionContext, rootUri: vscode.U
     const choice = await vscode.window.showInformationMessage(
       `${updates.length} agent(s) have updates available. Install the latest versions?`,
       'Update Agents',
-      'Skip For Now',
-      'Ask Next Time'
+      'Later'
     );
     
     if (choice === 'Update Agents') {
@@ -403,7 +402,7 @@ async function installAgents(context: vscode.ExtensionContext, rootUri: vscode.U
       }
       vscode.window.showInformationMessage('✅ Agents updated to latest versions');
     }
-    // 'Skip For Now' and 'Ask Next Time' do nothing - will ask again next reload
+    // 'Later' does nothing - will ask again next reload
     return;
   }
   
@@ -518,11 +517,11 @@ async function installProtected(context: vscode.ExtensionContext, rootUri: vscod
   
   if (updates.length > 0) {
     // Prompt user about available updates
-    const updateNames = updates.map(u => u.filename).join(', ');
+    const updateNames = updates.map((u: any) => u.filename).join(', ');
     const choice = await vscode.window.showInformationMessage(
       `Protected files have updates: ${updateNames}. Install the latest versions?`,
       'Update Files',
-      'Skip For Now'
+      'Later'
     );
     
     if (choice === 'Update Files') {
@@ -571,7 +570,7 @@ async function installMCP(context: vscode.ExtensionContext, rootUri: vscode.Uri)
       const choice = await vscode.window.showInformationMessage(
         'MCP configuration has updates. Install the latest version?',
         'Update MCP Config',
-        'Skip For Now'
+        'Later'
       );
       
       if (choice === 'Update MCP Config') {
