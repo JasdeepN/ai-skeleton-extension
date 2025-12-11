@@ -157,10 +157,10 @@ suite('AI-Memory E2E Tests', () => {
 		// Verify it contains sections for all entry types
 		const content = fs.readFileSync(memoryFile, 'utf-8');
 		assert.ok(content.includes('# AI-Memory Export'), 'Missing export header');
-		assert.ok(content.includes('## Brief'), 'Missing Brief section');
-		assert.ok(content.includes('## Patterns'), 'Missing Patterns section');
-		assert.ok(content.includes('## Context'), 'Missing Context section');
-		assert.ok(content.includes('## Decisions'), 'Missing Decisions section');
+		assert.ok(content.includes('## Project Brief'), 'Missing Brief section');
+		assert.ok(content.includes('## System Patterns'), 'Missing Patterns section');
+		assert.ok(content.includes('## Active Context'), 'Missing Context section');
+		assert.ok(content.includes('## Decision Log'), 'Missing Decisions section');
 		assert.ok(content.includes('## Progress'), 'Missing Progress section');
 	});
 });

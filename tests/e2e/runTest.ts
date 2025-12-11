@@ -27,6 +27,8 @@ async function main() {
 				testWorkspacePath, // Open the test workspace
 				'--disable-extensions', // Disable other extensions
 				'--disable-workspace-trust', // Disable workspace trust dialog
+				'--disable-gpu', // Disable GPU acceleration
+				'--no-sandbox', // Disable sandboxing (needed in CI)
 			],
 		});
 

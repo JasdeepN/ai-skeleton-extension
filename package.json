@@ -631,7 +631,7 @@
     "test:verify-embeddings": "node scripts/verify-embeddings.js",
     "test:embeddings": "jest tests/embeddings.test.js",
     "test": "jest",
-    "test:e2e": "tsc -p . && node ./dist/tests/e2e/runTest.js",
+    "test:e2e": "tsc -p . && xvfb-run -a node ./dist/tests/e2e/runTest.js",
     "test:coverage": "c8 npm test",
     "test:encoding": "node scripts/test-save-prompt.js",
     "test:promptstore": "node scripts/test-prompt-store.js",

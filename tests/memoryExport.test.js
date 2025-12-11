@@ -51,9 +51,9 @@ describe('memoryExport', () => {
     const writtenBuffer = writeArgs[1];
     const content = writtenBuffer.toString();
     expect(content).toContain('# AI-Memory Export');
-    expect(content).toContain('## Brief');
+    expect(content).toContain('## Project Brief');
     expect(content).toContain('[BRIEF:1] Project overview');
-    expect(content).toContain('## Context');
+    expect(content).toContain('## Active Context');
     expect(content).toContain('[CONTEXT:1] Context A');
     expect(content).toContain('[PROGRESS:1] Did something');
   });
