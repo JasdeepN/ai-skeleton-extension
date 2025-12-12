@@ -1,8 +1,7 @@
 name: Release to Marketplace
 
 on:
-  pull_request:
-    types: [closed]
+  push:
     branches: [release]
   workflow_dispatch:
 
@@ -16,8 +15,6 @@ env:
 jobs:
   release:
     name: Release & Publish
-    # Only run if PR was merged (not just closed) or manually triggered
-    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true
     runs-on: ubuntu-latest
     
     steps:
